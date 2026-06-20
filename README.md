@@ -15,6 +15,9 @@ card-manager-html/
 ├─ input/
 │  ├─ rakuten/      # 楽天カードCSVを置く
 │  └─ paypay/       # PayPayカードCSVを置く
+├─ samples/          # GitHubで共有するサンプルCSV
+│  ├─ rakuten/
+│  └─ paypay/
 ├─ archive/         # 取込済みCSVの退避先
 ├─ config/
 │  ├─ category_rules.csv
@@ -64,6 +67,9 @@ python src/main.py
 ```
 
 4. `output/report.html` をブラウザで開く
+
+入力形式を確認したい場合は `samples/` のCSVを参照してください。サンプルは
+集計対象の `input/` とは分離されています。
 
 ## カテゴリ分類を増やす
 

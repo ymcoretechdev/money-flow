@@ -4,13 +4,9 @@ __pycache__/
 *.py[cod]
 
 # Personal transaction data and generated reports
-input/*
-!input/paypay/
-!input/rakuten/
-input/paypay/*
-input/rakuten/*
-!input/paypay/sample_paypay.csv
-!input/rakuten/sample_rakuten.csv
+input/**
+!input/**/
+!input/**/.gitkeep
 archive/
 output/
 logs/

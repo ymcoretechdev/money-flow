@@ -29,16 +29,21 @@ def find_column(df: pd.DataFrame, candidates: list[str], label: str, path: Path)
     )
 
 
-def normalize_card_csv(path: Path, card_name: str, card_settings: dict, encodings: list[str]) -> pd.DataFrame:
+def normalize_transaction_csv(
+    path: Path,
+    payment_source: str,
+    source_settings: dict,
+    encodings: list[str],
+) -> pd.DataFrame:
     raw = read_csv_with_fallback(path, encodings)
 
-    date_col = find_column(raw, card_settings["date_columns"], "日付", path)
-    shop_col = find_column(raw, card_settings["shop_columns"], "利用先", path)
-    amount_col = find_column(raw, card_settings["amount_columns"], "金額", path)
+    date_col = find_column(raw, source_settings["date_columns"], "日付", path)
+    shop_col = find_column(raw, source_settings["shop_columns"], "利用先", path)
+    amount_col = find_column(raw, source_settings["amount_columns"], "金額", path)
 
     df = pd.DataFrame({
         "date": pd.to_datetime(raw[date_col], errors="coerce"),
-        "card": card_name,
+        "payment_source": payment_source,
         "shop": raw[shop_col].astype(str).str.strip(),
         "amount": raw[amount_col].apply(parse_amount),
         "source_file": path.name,
@@ -53,20 +58,30 @@ def load_all_transactions(input_dir: Path, settings: dict) -> pd.DataFrame:
     encodings = settings.get("encodings_to_try", ["utf-8-sig", "cp932", "shift_jis"])
     frames: list[pd.DataFrame] = []
 
-    card_map = {
+    source_map = {
         "rakuten": "楽天カード",
         "paypay": "PayPayカード",
+        "manual": "口座引き落とし",
     }
 
-    for folder_name, card_name in card_map.items():
+    for folder_name, payment_source in source_map.items():
         folder = input_dir / folder_name
         folder.mkdir(parents=True, exist_ok=True)
         for path in sorted(folder.glob("*.csv")):
-            frames.append(normalize_card_csv(path, card_name, settings[folder_name], encodings))
+            frames.append(
+                normalize_transaction_csv(
+                    path,
+                    payment_source,
+                    settings[folder_name],
+                    encodings,
+                )
+            )
 
     if not frames:
-        return pd.DataFrame(columns=["date", "card", "shop", "amount", "source_file"])
+        return pd.DataFrame(
+            columns=["date", "payment_source", "shop", "amount", "source_file"]
+        )
 
     df = pd.concat(frames, ignore_index=True)
-    df = df.sort_values(["date", "card", "shop"]).reset_index(drop=True)
+    df = df.sort_values(["date", "payment_source", "shop"]).reset_index(drop=True)
     return df

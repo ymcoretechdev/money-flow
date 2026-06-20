@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import html
 from pathlib import Path
+
 import pandas as pd
 
 from utils import format_yen, ensure_parent
@@ -52,10 +53,85 @@ def yen_table(df: pd.DataFrame) -> pd.DataFrame:
     return out
 
 
-def df_to_html_table(df: pd.DataFrame, empty_message: str = "データがありません。") -> str:
+def df_to_html_table(
+    df: pd.DataFrame,
+    table_id: str,
+    row_attributes: dict[str, str | object] | None = None,
+    empty_message: str = "データがありません。",
+) -> str:
     if df.empty:
         return f"<p class='empty'>{html.escape(empty_message)}</p>"
-    return yen_table(df).to_html(index=False, escape=True, classes="data-table")
+
+    row_attributes = row_attributes or {}
+    formatted = yen_table(df)
+    headers = "".join(f"<th>{html.escape(str(column))}</th>" for column in formatted.columns)
+    rows = []
+
+    for (_, raw_row), (_, display_row) in zip(df.iterrows(), formatted.iterrows()):
+        attributes = [f'data-amount="{int(raw_row["amount"])}"']
+        for attribute_name, source in row_attributes.items():
+            value = source(raw_row) if callable(source) else raw_row[source]
+            escaped_value = html.escape(str(value), quote=True)
+            attributes.append(f'data-{attribute_name}="{escaped_value}"')
+
+        cells = "".join(f"<td>{html.escape(str(value))}</td>" for value in display_row)
+        rows.append(f"<tr {' '.join(attributes)}>{cells}</tr>")
+
+    return (
+        f'<table class="dataframe data-table" id="{html.escape(table_id, quote=True)}">'
+        f"<thead><tr>{headers}</tr></thead>"
+        f"<tbody>{''.join(rows)}</tbody></table>"
+    )
+
+
+def filter_toolbar(
+    table_id: str,
+    filters: list[tuple[str, str, list[str]]],
+    row_count: int,
+    total: int,
+    count_unit: str = "行",
+    page_size: int | None = None,
+) -> str:
+    fields = []
+    for filter_name, label, options in filters:
+        option_html = ['<option value="">全て</option>']
+        for option in options:
+            escaped_option = html.escape(str(option), quote=True)
+            option_html.append(
+                f'<option value="{escaped_option}">{escaped_option}</option>'
+            )
+        select_id = f"{table_id}-{filter_name}-filter"
+        fields.append(
+            '<div class="filter-field">'
+            f'<label for="{select_id}">{html.escape(label)}</label>'
+            f'<select id="{select_id}" data-filter-table="{table_id}" '
+            f'data-filter-name="{filter_name}">{"".join(option_html)}</select>'
+            "</div>"
+        )
+
+    pagination = ""
+    if page_size:
+        pagination = (
+            f'<div class="pagination" data-pagination="{table_id}" '
+            f'data-page-size="{page_size}">'
+            '<button type="button" data-page-action="previous" '
+            'aria-label="前のページ" title="前のページ">&#8249;</button>'
+            '<span data-page-status>1 / 1</span>'
+            '<button type="button" data-page-action="next" '
+            'aria-label="次のページ" title="次のページ">&#8250;</button>'
+            "</div>"
+        )
+
+    return (
+        '<div class="filter-toolbar">'
+        f'<div class="filter-fields">{"".join(fields)}</div>'
+        '<div class="filter-meta">'
+        f'<div class="filter-result" data-filter-result="{table_id}" '
+        f'data-count-unit="{html.escape(count_unit, quote=True)}">'
+        f"{row_count:,}{html.escape(count_unit)} / {format_yen(total)}</div>"
+        f"{pagination}</div>"
+        "</div>"
+    )
 
 
 def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
@@ -68,6 +144,15 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     if not detail.empty:
         detail = detail[["date", "card", "shop", "category", "amount", "source_file"]]
         detail = detail.sort_values("date", ascending=False)
+
+    months = sorted(df["date"].dt.strftime("%Y-%m").unique(), reverse=True) if not df.empty else []
+    years = sorted({month[:4] for month in months}, reverse=True)
+    cards = sorted(df["card"].astype(str).unique()) if not df.empty else []
+    categories = (
+        summaries["category_total"]["category"].astype(str).tolist()
+        if not summaries["category_total"].empty
+        else []
+    )
 
     html_text = f"""<!doctype html>
 <html lang="ja">
@@ -86,8 +171,19 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     .data-table th, .data-table td {{ border: 1px solid #ddd; padding: 8px 10px; font-size: 14px; }}
     .data-table th {{ background: #eef3ff; text-align: left; }}
     .data-table tr:nth-child(even) {{ background: #fafafa; }}
+    .filter-toolbar {{ display: flex; align-items: end; justify-content: space-between; gap: 16px; flex-wrap: wrap; margin: 0 0 12px; }}
+    .filter-fields {{ display: flex; align-items: end; gap: 12px; flex-wrap: wrap; }}
+    .filter-meta {{ display: flex; align-items: center; justify-content: flex-end; gap: 16px; flex-wrap: wrap; }}
+    .filter-field {{ display: grid; gap: 6px; min-width: 220px; }}
+    .filter-field label {{ color: #555; font-size: 13px; font-weight: 600; }}
+    .filter-field select {{ min-height: 40px; padding: 8px 34px 8px 10px; border: 1px solid #aeb7c6; border-radius: 4px; background: white; color: #222; font: inherit; }}
+    .filter-result {{ color: #555; font-size: 14px; font-variant-numeric: tabular-nums; }}
+    .pagination {{ display: flex; align-items: center; gap: 8px; color: #555; font-size: 14px; font-variant-numeric: tabular-nums; }}
+    .pagination button {{ width: 36px; height: 36px; border: 1px solid #aeb7c6; border-radius: 4px; background: white; color: #222; font-size: 24px; line-height: 1; cursor: pointer; }}
+    .pagination button:disabled {{ color: #a0a6af; background: #f1f2f4; cursor: default; }}
     .empty {{ background: white; padding: 16px; border-radius: 8px; }}
     .note {{ color: #666; font-size: 13px; }}
+    @media (max-width: 640px) {{ body {{ margin: 18px; }} .filter-fields, .filter-field {{ width: 100%; }} }}
   </style>
 </head>
 <body>
@@ -100,19 +196,127 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
   </div>
 
   <h2>月別集計</h2>
-  {df_to_html_table(summaries['monthly'])}
+  {filter_toolbar('monthly-table', [('year', '年', years)], len(summaries['monthly']), total)}
+  {df_to_html_table(summaries['monthly'], 'monthly-table', {'year': lambda row: str(row['month'])[:4]})}
 
   <h2>月別・カード別集計</h2>
-  {df_to_html_table(summaries['card_monthly'])}
+  {filter_toolbar('card-monthly-table', [('card', 'カード', cards)], len(summaries['card_monthly']), total)}
+  {df_to_html_table(summaries['card_monthly'], 'card-monthly-table', {'card': 'card'})}
 
   <h2>カテゴリ別合計</h2>
-  {df_to_html_table(summaries['category_total'])}
+  {filter_toolbar('category-total-table', [('category', 'カテゴリ', categories)], len(summaries['category_total']), total)}
+  {df_to_html_table(summaries['category_total'], 'category-total-table', {'category': 'category'})}
 
   <h2>月別・カテゴリ別集計</h2>
-  {df_to_html_table(summaries['category_monthly'])}
+  {filter_toolbar('category-monthly-table', [('month', '月', months), ('category', 'カテゴリ', categories)], len(summaries['category_monthly']), total)}
+  {df_to_html_table(summaries['category_monthly'], 'category-monthly-table', {'month': 'month', 'category': 'category'})}
 
   <h2>明細一覧</h2>
-  {df_to_html_table(detail)}
+  {filter_toolbar('detail-table', [('month', '月', months), ('card', 'カード', cards), ('category', 'カテゴリ', categories)], count, total, '件', 100)}
+  {df_to_html_table(detail, 'detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'card': 'card', 'category': 'category'})}
+  <script>
+    const tableRows = new Map();
+    const filteredTableRows = new Map();
+    const currentTablePages = new Map();
+    const pendingFilterFrames = new Map();
+
+    document.querySelectorAll('[data-filter-result]').forEach((result) => {{
+      const tableId = result.dataset.filterResult;
+      const table = document.getElementById(tableId);
+      if (table) {{
+        const rows = Array.from(table.querySelectorAll('tbody tr'));
+        tableRows.set(tableId, rows);
+        filteredTableRows.set(tableId, rows);
+        currentTablePages.set(tableId, 0);
+      }}
+    }});
+
+    function renderTableRows(tableId) {{
+      const table = document.getElementById(tableId);
+      if (!table) return;
+
+      const rows = filteredTableRows.get(tableId) || [];
+      const pagination = document.querySelector(`[data-pagination="${{tableId}}"]`);
+      const pageSize = pagination ? Number(pagination.dataset.pageSize) : Math.max(rows.length, 1);
+      const pageCount = Math.max(1, Math.ceil(rows.length / pageSize));
+      const requestedPage = currentTablePages.get(tableId) || 0;
+      const currentPage = Math.max(0, Math.min(requestedPage, pageCount - 1));
+      const pageRows = rows.slice(currentPage * pageSize, (currentPage + 1) * pageSize);
+      const visibleRows = document.createDocumentFragment();
+
+      pageRows.forEach((row) => visibleRows.appendChild(row));
+      table.tBodies[0].replaceChildren(visibleRows);
+      currentTablePages.set(tableId, currentPage);
+
+      if (pagination) {{
+        pagination.querySelector('[data-page-status]').textContent = `${{currentPage + 1}} / ${{pageCount}}`;
+        pagination.querySelector('[data-page-action="previous"]').disabled = currentPage === 0;
+        pagination.querySelector('[data-page-action="next"]').disabled = currentPage >= pageCount - 1;
+      }}
+    }}
+
+    function applyTableFilters(tableId) {{
+      const table = document.getElementById(tableId);
+      if (!table) return;
+
+      const filters = Array.from(document.querySelectorAll(`[data-filter-table="${{tableId}}"]`));
+      const rows = tableRows.get(tableId) || [];
+      const result = document.querySelector(`[data-filter-result="${{tableId}}"]`);
+      const matchingRows = [];
+      let visibleCount = 0;
+      let visibleAmount = 0;
+
+      rows.forEach((row) => {{
+        const visible = filters.every((filter) => {{
+          const attribute = `data-${{filter.dataset.filterName}}`;
+          return !filter.value || row.getAttribute(attribute) === filter.value;
+        }});
+        if (visible) {{
+          matchingRows.push(row);
+          visibleCount += 1;
+          visibleAmount += Number(row.dataset.amount);
+        }}
+      }});
+
+      filteredTableRows.set(tableId, matchingRows);
+      currentTablePages.set(tableId, 0);
+      renderTableRows(tableId);
+
+      const formattedAmount = new Intl.NumberFormat('ja-JP', {{
+        style: 'currency',
+        currency: 'JPY',
+        maximumFractionDigits: 0,
+      }}).format(visibleAmount);
+      const countUnit = result.dataset.countUnit;
+      result.textContent = `${{visibleCount.toLocaleString('ja-JP')}}${{countUnit}} / ${{formattedAmount}}`;
+    }}
+
+    function scheduleTableFilter(tableId) {{
+      const pendingFrame = pendingFilterFrames.get(tableId);
+      if (pendingFrame) cancelAnimationFrame(pendingFrame);
+      pendingFilterFrames.set(tableId, requestAnimationFrame(() => {{
+        applyTableFilters(tableId);
+        pendingFilterFrames.delete(tableId);
+      }}));
+    }}
+
+    document.querySelectorAll('[data-filter-table]').forEach((filter) => {{
+      filter.addEventListener('change', () => scheduleTableFilter(filter.dataset.filterTable));
+    }});
+
+    document.querySelectorAll('[data-pagination]').forEach((pagination) => {{
+      const tableId = pagination.dataset.pagination;
+      pagination.querySelector('[data-page-action="previous"]').addEventListener('click', () => {{
+        currentTablePages.set(tableId, (currentTablePages.get(tableId) || 0) - 1);
+        renderTableRows(tableId);
+      }});
+      pagination.querySelector('[data-page-action="next"]').addEventListener('click', () => {{
+        currentTablePages.set(tableId, (currentTablePages.get(tableId) || 0) + 1);
+        renderTableRows(tableId);
+      }});
+      renderTableRows(tableId);
+    }});
+  </script>
 </body>
 </html>
 """

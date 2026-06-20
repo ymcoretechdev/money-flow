@@ -13,8 +13,10 @@ INVESTMENT_CATEGORY = "投資"
 COLUMN_LABELS = {
     "date": "利用日",
     "month": "月",
+    "transaction_type": "種別",
     "payment_source": "支払元",
     "shop": "利用先",
+    "income_source": "収入元",
     "category": "カテゴリ",
     "amount": "金額",
     "source_file": "取込ファイル",
@@ -42,12 +44,15 @@ def build_summaries(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
             "category_monthly": empty,
             "category_total": empty,
             "investment_monthly": empty,
+            "income_monthly": empty,
         }
 
     work = df.copy()
     work["month"] = work["date"].dt.strftime("%Y-%m")
-    spending = work[work["category"] != INVESTMENT_CATEGORY]
-    investment = work[work["category"] == INVESTMENT_CATEGORY]
+    expense = work[work["transaction_type"] == "expense"]
+    income = work[work["transaction_type"] == "income"]
+    spending = expense[expense["category"] != INVESTMENT_CATEGORY]
+    investment = expense[expense["category"] == INVESTMENT_CATEGORY]
 
     monthly = spending.groupby("month", as_index=False)["amount"].sum()
     source_monthly = spending.groupby(
@@ -56,6 +61,7 @@ def build_summaries(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     category_monthly = spending.groupby(["month", "category"], as_index=False)["amount"].sum()
     category_total = spending.groupby("category", as_index=False)["amount"].sum()
     investment_monthly = investment.groupby("month", as_index=False)["amount"].sum()
+    income_monthly = income.groupby("month", as_index=False)["amount"].sum()
 
     return {
         "monthly": monthly,
@@ -63,6 +69,7 @@ def build_summaries(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
         "category_monthly": sort_category_summary(category_monthly, ["month"]),
         "category_total": sort_category_summary(category_total),
         "investment_monthly": investment_monthly,
+        "income_monthly": income_monthly,
     }
 
 
@@ -162,24 +169,49 @@ def filter_toolbar(
 def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     ensure_parent(output_path)
     summaries = build_summaries(df)
-    spending = df[df["category"] != INVESTMENT_CATEGORY] if not df.empty else df
-    investment = df[df["category"] == INVESTMENT_CATEGORY] if not df.empty else df
+    expense = df[df["transaction_type"] == "expense"] if not df.empty else df
+    income = df[df["transaction_type"] == "income"] if not df.empty else df
+    spending = expense[expense["category"] != INVESTMENT_CATEGORY]
+    investment = expense[expense["category"] == INVESTMENT_CATEGORY]
     spending_total = int(spending["amount"].sum()) if not spending.empty else 0
     investment_total = int(investment["amount"].sum()) if not investment.empty else 0
-    all_total = spending_total + investment_total
+    income_total = int(income["amount"].sum()) if not income.empty else 0
+    expense_total = spending_total + investment_total
+    balance = income_total - spending_total
     count = len(df)
 
-    detail = df.copy()
+    detail = expense.copy()
     if not detail.empty:
         detail = detail[
             ["date", "payment_source", "shop", "category", "amount", "source_file"]
         ]
         detail = detail.sort_values("date", ascending=False)
 
-    months = sorted(df["date"].dt.strftime("%Y-%m").unique(), reverse=True) if not df.empty else []
+    income_detail = income.copy()
+    if not income_detail.empty:
+        income_detail = income_detail[["date", "shop", "amount", "source_file"]]
+        income_detail = income_detail.rename(columns={"shop": "income_source"})
+        income_detail = income_detail.sort_values("date", ascending=False)
+
+    months = (
+        sorted(expense["date"].dt.strftime("%Y-%m").unique(), reverse=True)
+        if not expense.empty
+        else []
+    )
     years = sorted({month[:4] for month in months}, reverse=True)
+    income_months = (
+        sorted(income["date"].dt.strftime("%Y-%m").unique(), reverse=True)
+        if not income.empty
+        else []
+    )
+    income_years = sorted({month[:4] for month in income_months}, reverse=True)
     payment_sources = (
-        sorted(df["payment_source"].astype(str).unique()) if not df.empty else []
+        sorted(expense["payment_source"].astype(str).unique())
+        if not expense.empty
+        else []
+    )
+    income_sources = (
+        sorted(income["shop"].astype(str).unique()) if not income.empty else []
     )
     spending_categories = (
         summaries["category_total"]["category"].astype(str).tolist()
@@ -231,12 +263,22 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
   <p class="note">CSVを読み込んで自動生成したローカルHTMLレポートです。</p>
 
   <div class="summary">
+    <div class="card"><div class="label">収入合計</div><div class="value">{format_yen(income_total)}</div></div>
     <div class="card"><div class="label">支出合計</div><div class="value">{format_yen(spending_total)}</div></div>
+    <div class="card"><div class="label">収支</div><div class="value">{format_yen(balance)}</div></div>
     <div class="card"><div class="label">投資合計</div><div class="value">{format_yen(investment_total)}</div></div>
     <div class="card"><div class="label">全明細件数</div><div class="value">{count:,}件</div></div>
   </div>
 
-  <h2>月別集計</h2>
+  <h2>収入集計</h2>
+  {filter_toolbar('income-monthly-table', [('year', '年', income_years)], len(summaries['income_monthly']), income_total)}
+  {df_to_html_table(summaries['income_monthly'], 'income-monthly-table', {'year': lambda row: str(row['month'])[:4]}, '収入データがありません。')}
+
+  <h2>収入明細</h2>
+  {filter_toolbar('income-detail-table', [('month', '月', income_months), ('source', '収入元', income_sources)], len(income_detail), income_total, '件', 100)}
+  {df_to_html_table(income_detail, 'income-detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'source': 'income_source'}, '収入データがありません。')}
+
+  <h2>月別支出</h2>
   {filter_toolbar('monthly-table', [('year', '年', years)], len(summaries['monthly']), spending_total)}
   {df_to_html_table(summaries['monthly'], 'monthly-table', {'year': lambda row: str(row['month'])[:4]})}
 
@@ -256,8 +298,8 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
   {filter_toolbar('category-monthly-table', [('month', '月', months), ('category', 'カテゴリ', spending_categories)], len(summaries['category_monthly']), spending_total)}
   {df_to_html_table(summaries['category_monthly'], 'category-monthly-table', {'month': 'month', 'category': 'category'})}
 
-  <h2>明細一覧</h2>
-  {filter_toolbar('detail-table', [('month', '月', months), ('source', '支払元', payment_sources), ('category', 'カテゴリ', categories)], count, all_total, '件', 100)}
+  <h2>支出明細一覧</h2>
+  {filter_toolbar('detail-table', [('month', '月', months), ('source', '支払元', payment_sources), ('category', 'カテゴリ', categories)], len(detail), expense_total, '件', 100)}
   {df_to_html_table(detail, 'detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'source': 'payment_source', 'category': 'category'})}
   <script>
     const tableRows = new Map();

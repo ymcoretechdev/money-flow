@@ -1,25 +1,28 @@
-# card-manager-html
+# money-flow
 
-クレジットカード明細CSVと手入力した口座引き落としを読み込んで、無料で見られるHTMLレポートを作るローカルツールです。
+クレジットカード明細、口座引き落とし、収入をまとめて、無料で見られるHTMLレポートを作るローカル家計管理ツールです。
 
 - Excel不要
 - Google Cloud設定不要
 - ブラウザで閲覧可能
 - 楽天カード / PayPayカードのCSVを想定
+- 口座引き落としと収入をCSVで手入力可能
 - カテゴリ分類ルールはCSVで編集可能
 
 ## フォルダ構成
 
 ```text
-card-manager-html/
+money-flow/
 ├─ input/
-│  ├─ rakuten/      # 楽天カードCSVを置く
-│  ├─ paypay/       # PayPayカードCSVを置く
-│  └─ manual/       # 口座引き落としを手入力する
+│  ├─ expense/
+│  │  ├─ rakuten/   # 楽天カードCSVを置く
+│  │  ├─ paypay/    # PayPayカードCSVを置く
+│  │  └─ manual/    # 口座引き落としを手入力する
+│  └─ income/
+│     └─ manual/    # 給与・賞与などを手入力する
 ├─ samples/          # GitHubで共有するサンプルCSV
-│  ├─ rakuten/
-│  ├─ paypay/
-│  └─ manual/
+│  ├─ expense/
+│  └─ income/
 ├─ archive/         # 取込済みCSVの退避先
 ├─ config/
 │  ├─ category_rules.csv
@@ -40,7 +43,7 @@ card-manager-html/
 ## セットアップ
 
 ```bash
-cd card-manager-html
+cd money-flow
 python -m venv .venv
 ```
 
@@ -60,18 +63,19 @@ pip install -r requirements.txt
 
 ## 使い方
 
-1. 楽天カードCSVを `input/rakuten/` に置く
-2. PayPayカードCSVを `input/paypay/` に置く
-3. 口座引き落としを `input/manual/` の各CSVに入力する
-4. 実行する
+1. 楽天カードCSVを `input/expense/rakuten/` に置く
+2. PayPayカードCSVを `input/expense/paypay/` に置く
+3. 口座引き落としを `input/expense/manual/` の各CSVに入力する
+4. 収入を `input/income/manual/` の各CSVに入力する
+5. 実行する
 
 ```bash
 python src/main.py
 ```
 
-5. `output/report.html` をブラウザで開く
+6. `output/report.html` をブラウザで開く
 
-手入力CSVは `rent.csv`、`electricity.csv`、`water.csv` に分かれており、
+支出の手入力CSVは `rent.csv`、`electricity.csv`、`water.csv` に分かれており、
 次の形式です。金額を入力した行だけが集計されます。
 
 ```csv
@@ -80,6 +84,16 @@ python src/main.py
 2026/06/15,電気代,12000
 2026/06/25,水道代,5000
 ```
+
+収入の手入力CSVは `salary.csv`、`bonus.csv`、`other.csv` に分かれています。
+
+```csv
+入金日,収入元,金額
+2026/06/25,給与,300000
+```
+
+レポートの収支は「収入 - 支出」で計算します。投資カテゴリは支出に含めず、
+別に集計します。
 
 実行後、生成されたHTMLレポートは既定のブラウザで自動的に開きます。自動で
 開きたくない場合は、`config/settings.json` の

@@ -19,5 +19,10 @@
     "date_columns": ["利用日"],
     "shop_columns": ["利用先"],
     "amount_columns": ["利用金額"]
+  },
+  "income": {
+    "date_columns": ["入金日"],
+    "shop_columns": ["収入元"],
+    "amount_columns": ["金額"]
   }
 }

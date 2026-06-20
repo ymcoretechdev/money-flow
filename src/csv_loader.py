@@ -32,6 +32,7 @@ def find_column(df: pd.DataFrame, candidates: list[str], label: str, path: Path)
 def normalize_transaction_csv(
     path: Path,
     payment_source: str,
+    transaction_type: str,
     source_settings: dict,
     encodings: list[str],
 ) -> pd.DataFrame:
@@ -43,6 +44,7 @@ def normalize_transaction_csv(
 
     df = pd.DataFrame({
         "date": pd.to_datetime(raw[date_col], errors="coerce"),
+        "transaction_type": transaction_type,
         "payment_source": payment_source,
         "shop": raw[shop_col].astype(str).str.strip(),
         "amount": raw[amount_col].apply(parse_amount),
@@ -58,30 +60,41 @@ def load_all_transactions(input_dir: Path, settings: dict) -> pd.DataFrame:
     encodings = settings.get("encodings_to_try", ["utf-8-sig", "cp932", "shift_jis"])
     frames: list[pd.DataFrame] = []
 
-    source_map = {
-        "rakuten": "楽天カード",
-        "paypay": "PayPayカード",
-        "manual": "口座引き落とし",
-    }
+    sources = [
+        ("expense/rakuten", "楽天カード", "expense", "rakuten"),
+        ("expense/paypay", "PayPayカード", "expense", "paypay"),
+        ("expense/manual", "口座引き落とし", "expense", "manual"),
+        ("income/manual", "手動入力", "income", "income"),
+    ]
 
-    for folder_name, payment_source in source_map.items():
-        folder = input_dir / folder_name
+    for folder_path, payment_source, transaction_type, settings_key in sources:
+        folder = input_dir / folder_path
         folder.mkdir(parents=True, exist_ok=True)
         for path in sorted(folder.glob("*.csv")):
             frames.append(
                 normalize_transaction_csv(
                     path,
                     payment_source,
-                    settings[folder_name],
+                    transaction_type,
+                    settings[settings_key],
                     encodings,
                 )
             )
 
     if not frames:
         return pd.DataFrame(
-            columns=["date", "payment_source", "shop", "amount", "source_file"]
+            columns=[
+                "date",
+                "transaction_type",
+                "payment_source",
+                "shop",
+                "amount",
+                "source_file",
+            ]
         )
 
     df = pd.concat(frames, ignore_index=True)
-    df = df.sort_values(["date", "payment_source", "shop"]).reset_index(drop=True)
+    df = df.sort_values(
+        ["date", "transaction_type", "payment_source", "shop"]
+    ).reset_index(drop=True)
     return df

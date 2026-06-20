@@ -20,7 +20,7 @@ from utils import ensure_parent, timestamp
 
 def archive_csv_files() -> None:
     for card in ["rakuten", "paypay"]:
-        src_dir = INPUT_DIR / card
+        src_dir = INPUT_DIR / "expense" / card
         dst_dir = ARCHIVE_DIR / card
         dst_dir.mkdir(parents=True, exist_ok=True)
         for path in src_dir.glob("*.csv"):
@@ -36,7 +36,11 @@ def main() -> None:
     rules.extend(load_category_rules(CATEGORY_RULES_PATH))
 
     if not df.empty:
-        df["category"] = df["shop"].apply(lambda shop: categorize(shop, rules))
+        expense_mask = df["transaction_type"] == "expense"
+        df.loc[expense_mask, "category"] = df.loc[expense_mask, "shop"].apply(
+            lambda shop: categorize(shop, rules)
+        )
+        df.loc[~expense_mask, "category"] = "収入"
 
     output_csv = ROOT_DIR / settings.get("output_csv", "output/merged_transactions.csv")
     output_html = ROOT_DIR / settings.get("output_html", "output/report.html")

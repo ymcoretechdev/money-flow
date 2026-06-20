@@ -9,6 +9,7 @@ from utils import format_yen, ensure_parent
 
 
 LAST_CATEGORY_POSITIONS = {"その他": 1, "未分類": 2}
+INVESTMENT_CATEGORY = "投資"
 
 
 def sort_category_summary(df: pd.DataFrame, leading_columns: list[str] | None = None) -> pd.DataFrame:
@@ -26,21 +27,31 @@ def sort_category_summary(df: pd.DataFrame, leading_columns: list[str] | None = 
 def build_summaries(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     if df.empty:
         empty = pd.DataFrame()
-        return {"monthly": empty, "card_monthly": empty, "category_monthly": empty, "category_total": empty}
+        return {
+            "monthly": empty,
+            "card_monthly": empty,
+            "category_monthly": empty,
+            "category_total": empty,
+            "investment_monthly": empty,
+        }
 
     work = df.copy()
     work["month"] = work["date"].dt.strftime("%Y-%m")
+    spending = work[work["category"] != INVESTMENT_CATEGORY]
+    investment = work[work["category"] == INVESTMENT_CATEGORY]
 
-    monthly = work.groupby("month", as_index=False)["amount"].sum()
-    card_monthly = work.groupby(["month", "card"], as_index=False)["amount"].sum()
-    category_monthly = work.groupby(["month", "category"], as_index=False)["amount"].sum()
-    category_total = work.groupby("category", as_index=False)["amount"].sum()
+    monthly = spending.groupby("month", as_index=False)["amount"].sum()
+    card_monthly = spending.groupby(["month", "card"], as_index=False)["amount"].sum()
+    category_monthly = spending.groupby(["month", "category"], as_index=False)["amount"].sum()
+    category_total = spending.groupby("category", as_index=False)["amount"].sum()
+    investment_monthly = investment.groupby("month", as_index=False)["amount"].sum()
 
     return {
         "monthly": monthly,
         "card_monthly": card_monthly,
         "category_monthly": sort_category_summary(category_monthly, ["month"]),
         "category_total": sort_category_summary(category_total),
+        "investment_monthly": investment_monthly,
     }
 
 
@@ -137,7 +148,11 @@ def filter_toolbar(
 def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     ensure_parent(output_path)
     summaries = build_summaries(df)
-    total = int(df["amount"].sum()) if not df.empty else 0
+    spending = df[df["category"] != INVESTMENT_CATEGORY] if not df.empty else df
+    investment = df[df["category"] == INVESTMENT_CATEGORY] if not df.empty else df
+    spending_total = int(spending["amount"].sum()) if not spending.empty else 0
+    investment_total = int(investment["amount"].sum()) if not investment.empty else 0
+    all_total = spending_total + investment_total
     count = len(df)
 
     detail = df.copy()
@@ -148,11 +163,18 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     months = sorted(df["date"].dt.strftime("%Y-%m").unique(), reverse=True) if not df.empty else []
     years = sorted({month[:4] for month in months}, reverse=True)
     cards = sorted(df["card"].astype(str).unique()) if not df.empty else []
-    categories = (
+    spending_categories = (
         summaries["category_total"]["category"].astype(str).tolist()
         if not summaries["category_total"].empty
         else []
     )
+    categories = spending_categories.copy()
+    if not investment.empty:
+        special_position = next(
+            (index for index, category in enumerate(categories) if category in LAST_CATEGORY_POSITIONS),
+            len(categories),
+        )
+        categories.insert(special_position, INVESTMENT_CATEGORY)
 
     html_text = f"""<!doctype html>
 <html lang="ja">
@@ -191,28 +213,33 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
   <p class="note">CSVを読み込んで自動生成したローカルHTMLレポートです。</p>
 
   <div class="summary">
-    <div class="card"><div class="label">合計金額</div><div class="value">{format_yen(total)}</div></div>
-    <div class="card"><div class="label">明細件数</div><div class="value">{count:,}件</div></div>
+    <div class="card"><div class="label">支出合計</div><div class="value">{format_yen(spending_total)}</div></div>
+    <div class="card"><div class="label">投資合計</div><div class="value">{format_yen(investment_total)}</div></div>
+    <div class="card"><div class="label">全明細件数</div><div class="value">{count:,}件</div></div>
   </div>
 
   <h2>月別集計</h2>
-  {filter_toolbar('monthly-table', [('year', '年', years)], len(summaries['monthly']), total)}
+  {filter_toolbar('monthly-table', [('year', '年', years)], len(summaries['monthly']), spending_total)}
   {df_to_html_table(summaries['monthly'], 'monthly-table', {'year': lambda row: str(row['month'])[:4]})}
 
+  <h2>投資集計</h2>
+  {filter_toolbar('investment-monthly-table', [('year', '年', years)], len(summaries['investment_monthly']), investment_total)}
+  {df_to_html_table(summaries['investment_monthly'], 'investment-monthly-table', {'year': lambda row: str(row['month'])[:4]}, '投資データがありません。')}
+
   <h2>月別・カード別集計</h2>
-  {filter_toolbar('card-monthly-table', [('card', 'カード', cards)], len(summaries['card_monthly']), total)}
+  {filter_toolbar('card-monthly-table', [('card', 'カード', cards)], len(summaries['card_monthly']), spending_total)}
   {df_to_html_table(summaries['card_monthly'], 'card-monthly-table', {'card': 'card'})}
 
   <h2>カテゴリ別合計</h2>
-  {filter_toolbar('category-total-table', [('category', 'カテゴリ', categories)], len(summaries['category_total']), total)}
+  {filter_toolbar('category-total-table', [('category', 'カテゴリ', spending_categories)], len(summaries['category_total']), spending_total)}
   {df_to_html_table(summaries['category_total'], 'category-total-table', {'category': 'category'})}
 
   <h2>月別・カテゴリ別集計</h2>
-  {filter_toolbar('category-monthly-table', [('month', '月', months), ('category', 'カテゴリ', categories)], len(summaries['category_monthly']), total)}
+  {filter_toolbar('category-monthly-table', [('month', '月', months), ('category', 'カテゴリ', spending_categories)], len(summaries['category_monthly']), spending_total)}
   {df_to_html_table(summaries['category_monthly'], 'category-monthly-table', {'month': 'month', 'category': 'category'})}
 
   <h2>明細一覧</h2>
-  {filter_toolbar('detail-table', [('month', '月', months), ('card', 'カード', cards), ('category', 'カテゴリ', categories)], count, total, '件', 100)}
+  {filter_toolbar('detail-table', [('month', '月', months), ('card', 'カード', cards), ('category', 'カテゴリ', categories)], count, all_total, '件', 100)}
   {df_to_html_table(detail, 'detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'card': 'card', 'category': 'category'})}
   <script>
     const tableRows = new Map();

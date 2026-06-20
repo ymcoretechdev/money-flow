@@ -5,7 +5,14 @@ import webbrowser
 from pathlib import Path
 
 from category import load_category_rules, categorize
-from config import INPUT_DIR, ARCHIVE_DIR, OUTPUT_DIR, CATEGORY_RULES_PATH, load_settings, ROOT_DIR
+from config import (
+    ARCHIVE_DIR,
+    CATEGORY_RULES_PATH,
+    INPUT_DIR,
+    LOCAL_CATEGORY_RULES_PATH,
+    ROOT_DIR,
+    load_settings,
+)
 from csv_loader import load_all_transactions
 from report import generate_html_report
 from utils import ensure_parent, timestamp
@@ -26,6 +33,7 @@ def main() -> None:
 
     df = load_all_transactions(INPUT_DIR, settings)
     rules = load_category_rules(CATEGORY_RULES_PATH)
+    rules.extend(load_category_rules(LOCAL_CATEGORY_RULES_PATH))
 
     if not df.empty:
         df["category"] = df["shop"].apply(lambda shop: categorize(shop, rules))

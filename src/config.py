@@ -10,6 +10,7 @@ LOG_DIR = ROOT_DIR / "logs"
 
 SETTINGS_PATH = CONFIG_DIR / "settings.json"
 CATEGORY_RULES_PATH = CONFIG_DIR / "category_rules.csv"
+LOCAL_CATEGORY_RULES_PATH = CONFIG_DIR / "category_rules.local.csv"
 
 
 def load_settings() -> dict:

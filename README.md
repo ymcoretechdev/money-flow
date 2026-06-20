@@ -88,6 +88,10 @@ ENEOS,車・ガソリン
 
 店舗名に `keyword` が含まれていたら、その `category` に分類します。
 
+個人的な店舗名や地域が分かるルールは `config/category_rules.local.csv` に
+記載してください。このファイルも同じ `keyword,category` 形式で読み込まれ、
+GitHubにはアップロードされません。
+
 ## CSV列名が合わない場合
 
 カード会社のCSV列名が違う場合は、`config/settings.json` の候補列名を追加してください。

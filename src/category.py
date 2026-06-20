@@ -1,7 +1,9 @@
 from __future__ import annotations
 
-import pandas as pd
+import unicodedata
 from pathlib import Path
+
+import pandas as pd
 
 
 def load_category_rules(path: Path) -> list[tuple[str, str]]:
@@ -22,11 +24,11 @@ def load_category_rules(path: Path) -> list[tuple[str, str]]:
 
 
 def categorize(shop_name: str, rules: list[tuple[str, str]]) -> str:
-    text = str(shop_name)
-    upper_text = text.upper()
+    text = unicodedata.normalize("NFKC", str(shop_name)).upper()
 
     for keyword, category in rules:
-        if keyword in text or keyword.upper() in upper_text:
+        normalized_keyword = unicodedata.normalize("NFKC", keyword).upper()
+        if normalized_keyword in text:
             return category
 
     return "未分類"

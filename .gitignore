@@ -7,6 +7,7 @@ __pycache__/
 input/**
 !input/**/
 !input/**/.gitkeep
+config/category_rules.local.csv
 archive/
 output/
 logs/

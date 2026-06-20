@@ -68,6 +68,10 @@ python src/main.py
 
 4. `output/report.html` をブラウザで開く
 
+実行後、生成されたHTMLレポートは既定のブラウザで自動的に開きます。自動で
+開きたくない場合は、`config/settings.json` の
+`open_report_after_generation` を `false` に変更してください。
+
 入力形式を確認したい場合は `samples/` のCSVを参照してください。サンプルは
 集計対象の `input/` とは分離されています。
 

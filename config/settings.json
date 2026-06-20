@@ -2,6 +2,7 @@
   "currency": "JPY",
   "output_html": "output/report.html",
   "output_csv": "output/merged_transactions.csv",
+  "open_report_after_generation": true,
   "archive_after_import": false,
   "encodings_to_try": ["utf-8-sig", "cp932", "shift_jis"],
   "rakuten": {

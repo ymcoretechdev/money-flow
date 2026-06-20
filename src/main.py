@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import shutil
+import webbrowser
 from pathlib import Path
 
 from category import load_category_rules, categorize
@@ -43,6 +44,9 @@ def main() -> None:
     print("完了しました。")
     print(f"HTMLレポート: {output_html}")
     print(f"統合CSV: {output_csv}")
+
+    if settings.get("open_report_after_generation", True):
+        webbrowser.open(output_html.resolve().as_uri())
 
 
 if __name__ == "__main__":

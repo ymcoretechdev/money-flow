@@ -90,7 +90,7 @@ ENEOS,車・ガソリン
 
 個人的な店舗名や地域が分かるルールは `config/category_rules.local.csv` に
 記載してください。このファイルも同じ `keyword,category` 形式で読み込まれ、
-GitHubにはアップロードされません。
+共通ルールより優先されます。GitHubにはアップロードされません。
 
 ## CSV列名が合わない場合
 

@@ -16,9 +16,11 @@ def load_category_rules(path: Path) -> list[tuple[str, str]]:
 
     rules = []
     for _, row in df.iterrows():
+        if pd.isna(row["keyword"]) or pd.isna(row["category"]):
+            continue
         keyword = str(row["keyword"]).strip()
         category = str(row["category"]).strip()
-        if keyword:
+        if keyword and category:
             rules.append((keyword, category))
     return rules
 

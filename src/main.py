@@ -32,8 +32,8 @@ def main() -> None:
     settings = load_settings()
 
     df = load_all_transactions(INPUT_DIR, settings)
-    rules = load_category_rules(CATEGORY_RULES_PATH)
-    rules.extend(load_category_rules(LOCAL_CATEGORY_RULES_PATH))
+    rules = load_category_rules(LOCAL_CATEGORY_RULES_PATH)
+    rules.extend(load_category_rules(CATEGORY_RULES_PATH))
 
     if not df.empty:
         df["category"] = df["shop"].apply(lambda shop: categorize(shop, rules))

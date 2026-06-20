@@ -7,6 +7,21 @@ import pandas as pd
 from utils import format_yen, ensure_parent
 
 
+LAST_CATEGORY_POSITIONS = {"その他": 1, "未分類": 2}
+
+
+def sort_category_summary(df: pd.DataFrame, leading_columns: list[str] | None = None) -> pd.DataFrame:
+    leading_columns = leading_columns or []
+
+    out = df.copy()
+    out["_category_position"] = out["category"].map(LAST_CATEGORY_POSITIONS).fillna(0)
+    out = out.sort_values(
+        [*leading_columns, "_category_position", "amount"],
+        ascending=[True] * len(leading_columns) + [True, False],
+    )
+    return out.drop(columns="_category_position").reset_index(drop=True)
+
+
 def build_summaries(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     if df.empty:
         empty = pd.DataFrame()
@@ -18,13 +33,13 @@ def build_summaries(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
     monthly = work.groupby("month", as_index=False)["amount"].sum()
     card_monthly = work.groupby(["month", "card"], as_index=False)["amount"].sum()
     category_monthly = work.groupby(["month", "category"], as_index=False)["amount"].sum()
-    category_total = work.groupby("category", as_index=False)["amount"].sum().sort_values("amount", ascending=False)
+    category_total = work.groupby("category", as_index=False)["amount"].sum()
 
     return {
         "monthly": monthly,
         "card_monthly": card_monthly,
-        "category_monthly": category_monthly.sort_values(["month", "amount"], ascending=[True, False]),
-        "category_total": category_total,
+        "category_monthly": sort_category_summary(category_monthly, ["month"]),
+        "category_total": sort_category_summary(category_total),
     }
 
 

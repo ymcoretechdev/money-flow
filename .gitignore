@@ -1,0 +1,21 @@
+# Python
+.venv/
+__pycache__/
+*.py[cod]
+
+# Personal transaction data and generated reports
+input/*
+!input/paypay/
+!input/rakuten/
+input/paypay/*
+input/rakuten/*
+!input/paypay/sample_paypay.csv
+!input/rakuten/sample_rakuten.csv
+archive/
+output/
+logs/
+
+# Local editor and OS files
+.agents/
+.DS_Store
+Thumbs.db

@@ -20,12 +20,13 @@ from utils import ensure_parent, timestamp
 
 def archive_csv_files() -> None:
     for card in ["rakuten", "paypay"]:
-        src_dir = INPUT_DIR / "expense" / card
-        dst_dir = ARCHIVE_DIR / card
-        dst_dir.mkdir(parents=True, exist_ok=True)
-        for path in src_dir.glob("*.csv"):
-            dst = dst_dir / f"{path.stem}_{timestamp()}{path.suffix}"
-            shutil.move(str(path), str(dst))
+        for src_dir in (INPUT_DIR / "expense").glob(f"*/{card}"):
+            owner = src_dir.parent.name
+            dst_dir = ARCHIVE_DIR / "expense" / owner / card
+            dst_dir.mkdir(parents=True, exist_ok=True)
+            for path in src_dir.glob("*.csv"):
+                dst = dst_dir / f"{path.stem}_{timestamp()}{path.suffix}"
+                shutil.move(str(path), str(dst))
 
 
 def main() -> None:

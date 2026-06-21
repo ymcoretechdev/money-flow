@@ -15,11 +15,13 @@
 money-flow/
 ├─ input/
 │  ├─ expense/
-│  │  ├─ rakuten/   # 楽天カードCSVを置く
-│  │  ├─ paypay/    # PayPayカードCSVを置く
-│  │  └─ manual/    # 口座引き落としを手入力する
+│  │  ├─ husband/   # 夫の支出
+│  │  ├─ wife/      # 妻の支出
+│  │  └─ common/    # 共通の支出
 │  └─ income/
-│     └─ manual/    # 収入を手入力する
+│     ├─ husband/   # 夫の収入
+│     ├─ wife/      # 妻の収入
+│     └─ common/    # 共通の収入
 ├─ samples/          # GitHubで共有するサンプルCSV
 │  ├─ expense/
 │  └─ income/
@@ -63,10 +65,10 @@ pip install -r requirements.txt
 
 ## 使い方
 
-1. 楽天カードCSVを `input/expense/rakuten/` に置く
-2. PayPayカードCSVを `input/expense/paypay/` に置く
-3. 口座引き落としを `input/expense/manual/` の各CSVに入力する
-4. 収入を `input/income/manual/` の各CSVに入力する
+1. 収入・支出を `husband`、`wife`、`common` の各フォルダに置く
+2. 楽天カードCSVは支出区分内の `rakuten/` に置く
+3. PayPayカードCSVは支出区分内の `paypay/` に置く
+4. 手入力CSVは各区分内へ任意のファイル名で置く
 5. 実行する
 
 ```bash
@@ -75,7 +77,8 @@ python src/main.py
 
 6. `output/report.html` をブラウザで開く
 
-支出の手入力CSVは `input/expense/manual/` に任意のファイル名で作成できます。
+支出の手入力CSVは `input/expense/husband/`、`wife/`、`common/` の
+該当する区分に任意のファイル名で作成できます。
 次の形式で入力し、金額が空欄の行は集計されません。
 
 ```csv
@@ -83,7 +86,8 @@ python src/main.py
 2026/06/01,任意の支出,10000
 ```
 
-収入の手入力CSVは `input/income/manual/` に任意のファイル名で作成できます。
+収入の手入力CSVも `input/income/` 内の該当する区分に任意のファイル名で
+作成できます。
 次の形式で入力し、金額が空欄の行は集計されません。
 
 ```csv
@@ -92,7 +96,8 @@ python src/main.py
 ```
 
 レポートの収支は「収入 - 支出」で計算します。投資カテゴリは支出に含めず、
-別に集計します。
+別に集計します。夫・妻の個別収支では、共通支出の50%ずつをそれぞれの
+支出として計算します。
 
 実行後、生成されたHTMLレポートは既定のブラウザで自動的に開きます。自動で
 開きたくない場合は、`config/settings.json` の

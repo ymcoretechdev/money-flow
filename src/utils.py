@@ -28,7 +28,10 @@ def parse_amount(value) -> int:
 
 
 def format_yen(value: int | float) -> str:
-    return f"¥{int(value):,}"
+    number = float(value)
+    if number.is_integer():
+        return f"¥{int(number):,}"
+    return f"¥{number:,.1f}"
 
 
 def timestamp() -> str:

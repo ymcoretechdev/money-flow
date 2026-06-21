@@ -20,7 +20,7 @@ COLUMN_LABELS = {
     "month": "月",
     "year": "年",
     "transaction_type": "種別",
-    "owner": "区分",
+    "owner": "家計区分",
     "payment_source": "支払元",
     "shop": "利用先",
     "income_source": "収入元",
@@ -466,9 +466,14 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 32px; background: #f7f8fb; color: #222; }}
     h1 {{ margin-bottom: 8px; }}
     h2 {{ margin-top: 32px; border-left: 6px solid #3367d6; padding-left: 10px; }}
-    h3 {{ margin: 24px 0 12px; font-size: 17px; }}
+    h3 {{ margin: 24px 0 12px; font-size: 18px; }}
+    h4 {{ margin: 20px 0 10px; color: #475569; font-size: 14px; }}
+    .section-note {{ margin: -4px 0 18px; color: #64748b; font-size: 13px; }}
+    .summary-group {{ margin-top: 24px; }}
+    .summary-group h3 {{ margin-bottom: 10px; }}
     .summary {{ display: flex; gap: 16px; flex-wrap: wrap; margin: 20px 0; }}
-    .card {{ background: white; border-radius: 12px; padding: 18px 22px; box-shadow: 0 2px 10px rgba(0,0,0,.06); min-width: 180px; }}
+    .summary-group .summary {{ margin-top: 0; }}
+    .card {{ background: white; border-radius: 6px; padding: 18px 22px; box-shadow: 0 2px 10px rgba(0,0,0,.06); min-width: 180px; }}
     .label {{ color: #666; font-size: 14px; }}
     .value {{ font-size: 26px; font-weight: 700; margin-top: 6px; }}
     .data-table {{ border-collapse: collapse; width: 100%; background: white; box-shadow: 0 2px 10px rgba(0,0,0,.04); }}
@@ -485,6 +490,16 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     .pagination {{ display: flex; align-items: center; gap: 8px; color: #555; font-size: 14px; font-variant-numeric: tabular-nums; }}
     .pagination button {{ width: 36px; height: 36px; border: 1px solid #aeb7c6; border-radius: 4px; background: white; color: #222; font-size: 24px; line-height: 1; cursor: pointer; }}
     .pagination button:disabled {{ color: #a0a6af; background: #f1f2f4; cursor: default; }}
+    .report-nav {{ position: sticky; top: 0; z-index: 10; display: flex; align-items: center; gap: 4px; margin: 20px -32px 24px; padding: 10px 32px; background: rgba(247, 248, 251, 0.96); border-top: 1px solid #dfe3ea; border-bottom: 1px solid #dfe3ea; backdrop-filter: blur(8px); }}
+    .nav-group {{ position: relative; flex: 0 0 auto; }}
+    .report-nav a {{ display: block; padding: 7px 10px; border-radius: 4px; color: #334155; font-size: 13px; font-weight: 600; text-decoration: none; white-space: nowrap; }}
+    .nav-group > a::after {{ content: '▼'; margin-left: 6px; color: #64748b; font-size: 9px; }}
+    .report-nav a:hover, .report-nav a:focus-visible {{ background: #e2e8f0; color: #111827; outline: none; }}
+    .nav-submenu {{ position: absolute; top: 100%; left: 0; display: none; min-width: 180px; padding: 6px; background: white; border: 1px solid #cbd5e1; border-radius: 6px; box-shadow: 0 8px 24px rgba(15, 23, 42, .14); }}
+    .nav-submenu a {{ padding: 9px 10px; font-weight: 500; }}
+    .nav-group:nth-last-child(-n+2) .nav-submenu {{ right: 0; left: auto; }}
+    .nav-group:hover .nav-submenu, .nav-group:focus-within .nav-submenu {{ display: block; }}
+    h2[id], h3[id], h4[id] {{ scroll-margin-top: 72px; }}
     .chart-toolbar {{ display: flex; align-items: end; gap: 12px; margin-bottom: 16px; }}
     .chart-grid {{ display: grid; gap: 20px; }}
     .chart-panel {{ background: white; border: 1px solid #dfe3ea; border-radius: 6px; padding: 16px; }}
@@ -496,25 +511,76 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     .legend-swatch {{ width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto; }}
     .empty {{ background: white; padding: 16px; border-radius: 8px; }}
     .note {{ color: #666; font-size: 13px; }}
-    @media (max-width: 640px) {{ body {{ margin: 18px; }} .filter-fields, .filter-field {{ width: 100%; }} }}
+    @media (max-width: 640px) {{ body {{ margin: 18px; }} .report-nav {{ flex-wrap: wrap; margin-right: -18px; margin-left: -18px; padding-right: 18px; padding-left: 18px; }} .filter-fields, .filter-field {{ width: 100%; }} }}
   </style>
 </head>
 <body>
   <h1>家計収支レポート</h1>
   <p class="note">CSVを読み込んで自動生成したローカルHTMLレポートです。</p>
 
-  <div class="summary">
-    <div class="card"><div class="label">世帯収支</div><div class="value">{format_yen(balance)}</div></div>
-    <div class="card"><div class="label">夫収支</div><div class="value">{format_yen(owner_balances.get(HUSBAND_OWNER, 0))}</div></div>
-    <div class="card"><div class="label">妻収支</div><div class="value">{format_yen(owner_balances.get(WIFE_OWNER, 0))}</div></div>
-    <div class="card"><div class="label">共通収支</div><div class="value">{format_yen(owner_balances.get(COMMON_OWNER, 0))}</div></div>
-    <div class="card"><div class="label">収入合計</div><div class="value">{format_yen(income_total)}</div></div>
-    <div class="card"><div class="label">支出合計</div><div class="value">{format_yen(spending_total)}</div></div>
-    <div class="card"><div class="label">投資合計</div><div class="value">{format_yen(investment_total)}</div></div>
-    <div class="card"><div class="label">全明細件数</div><div class="value">{count:,}件</div></div>
+  <nav class="report-nav" aria-label="レポート目次">
+    <div class="nav-group">
+      <a href="#overview">概要</a>
+      <div class="nav-submenu">
+        <a href="#balance-summary">収支</a>
+        <a href="#total-summary">全期間の合計</a>
+        <a href="#monthly-trends">月別推移</a>
+      </div>
+    </div>
+    <div class="nav-group">
+      <a href="#cashflow">収支</a>
+      <div class="nav-submenu">
+        <a href="#household-cashflow">世帯全体</a>
+        <a href="#owner-cashflow">夫・妻・共通</a>
+      </div>
+    </div>
+    <div class="nav-group">
+      <a href="#income">収入</a>
+      <div class="nav-submenu"><a href="#monthly-income">月ごとの収入</a></div>
+    </div>
+    <div class="nav-group">
+      <a href="#expenses">支出</a>
+      <div class="nav-submenu">
+        <a href="#monthly-expenses">月ごとの合計</a>
+        <a href="#category-expenses">カテゴリごと</a>
+        <a href="#source-expenses">支払元ごと</a>
+      </div>
+    </div>
+    <div class="nav-group">
+      <a href="#investments">投資</a>
+      <div class="nav-submenu"><a href="#monthly-investments">月ごとの投資</a></div>
+    </div>
+    <div class="nav-group">
+      <a href="#details">明細</a>
+      <div class="nav-submenu">
+        <a href="#income-details">収入明細</a>
+        <a href="#expense-details">支出明細</a>
+      </div>
+    </div>
+  </nav>
+
+  <h2 id="overview">概要</h2>
+  <p class="section-note">読み込んだ全期間の合計と、月ごとの推移です。</p>
+  <div class="summary-group">
+    <h3 id="balance-summary">収支</h3>
+    <div class="summary">
+      <div class="card"><div class="label">世帯全体</div><div class="value">{format_yen(balance)}</div></div>
+      <div class="card"><div class="label">夫</div><div class="value">{format_yen(owner_balances.get(HUSBAND_OWNER, 0))}</div></div>
+      <div class="card"><div class="label">妻</div><div class="value">{format_yen(owner_balances.get(WIFE_OWNER, 0))}</div></div>
+      <div class="card"><div class="label">共通</div><div class="value">{format_yen(owner_balances.get(COMMON_OWNER, 0))}</div></div>
+    </div>
+  </div>
+  <div class="summary-group">
+    <h3 id="total-summary">全期間の合計</h3>
+    <div class="summary">
+      <div class="card"><div class="label">収入</div><div class="value">{format_yen(income_total)}</div></div>
+      <div class="card"><div class="label">生活支出</div><div class="value">{format_yen(spending_total)}</div></div>
+      <div class="card"><div class="label">投資</div><div class="value">{format_yen(investment_total)}</div></div>
+      <div class="card"><div class="label">明細件数</div><div class="value">{count:,}件</div></div>
+    </div>
   </div>
 
-  <h2>月別グラフ</h2>
+  <h3 id="monthly-trends">月別推移</h3>
   <div class="chart-toolbar">
     <div class="filter-field">
       <label for="chart-year-filter">年</label>
@@ -538,54 +604,65 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
   </div>
   <script type="application/json" id="chart-data">{chart_data_json}</script>
 
-  <h2>収支集計</h2>
-  <h3>年別</h3>
+  <h2 id="cashflow">収支</h2>
+  <p class="section-note">生活支出を収入から差し引いた金額です。共通支出は夫・妻に半分ずつ配分します。</p>
+  <h3 id="household-cashflow">世帯全体</h3>
+  <h4>年ごと</h4>
   {filter_toolbar('cashflow-yearly-table', [], len(summaries['cashflow_yearly']), balance)}
   {df_to_html_table(summaries['cashflow_yearly'], 'cashflow-yearly-table', amount_column='balance')}
 
-  <h3>月別</h3>
+  <h4>月ごと</h4>
   {filter_toolbar('cashflow-monthly-table', [('year', '年', cashflow_years)], len(summaries['cashflow_monthly']), balance)}
   {df_to_html_table(summaries['cashflow_monthly'], 'cashflow-monthly-table', {'year': lambda row: str(row['month'])[:4]}, amount_column='balance')}
 
-  <h2>区分別収支</h2>
-  <h3>年別</h3>
-  {filter_toolbar('owner-cashflow-yearly-table', [('owner', '区分', owner_options)], len(summaries['owner_cashflow_yearly']), int(summaries['owner_cashflow_yearly']['balance'].sum()) if not summaries['owner_cashflow_yearly'].empty else 0)}
+  <h3 id="owner-cashflow">夫・妻・共通</h3>
+  <h4>年ごと</h4>
+  {filter_toolbar('owner-cashflow-yearly-table', [('owner', '家計区分', owner_options)], len(summaries['owner_cashflow_yearly']), int(summaries['owner_cashflow_yearly']['balance'].sum()) if not summaries['owner_cashflow_yearly'].empty else 0)}
   {df_to_html_table(summaries['owner_cashflow_yearly'], 'owner-cashflow-yearly-table', {'owner': 'owner'}, amount_column='balance')}
 
-  <h3>月別</h3>
-  {filter_toolbar('owner-cashflow-monthly-table', [('year', '年', owner_cashflow_years), ('owner', '区分', owner_options)], len(summaries['owner_cashflow_monthly']), int(summaries['owner_cashflow_monthly']['balance'].sum()) if not summaries['owner_cashflow_monthly'].empty else 0)}
+  <h4>月ごと</h4>
+  {filter_toolbar('owner-cashflow-monthly-table', [('year', '年', owner_cashflow_years), ('owner', '家計区分', owner_options)], len(summaries['owner_cashflow_monthly']), int(summaries['owner_cashflow_monthly']['balance'].sum()) if not summaries['owner_cashflow_monthly'].empty else 0)}
   {df_to_html_table(summaries['owner_cashflow_monthly'], 'owner-cashflow-monthly-table', {'year': lambda row: str(row['month'])[:4], 'owner': 'owner'}, amount_column='balance')}
 
-  <h2>収入集計</h2>
+  <h2 id="income">収入</h2>
+  <p class="section-note">給与や賞与など、手入力した収入の月別合計です。</p>
+  <h3 id="monthly-income">月ごとの収入</h3>
   {filter_toolbar('income-monthly-table', [('year', '年', income_years)], len(summaries['income_monthly']), income_total)}
   {df_to_html_table(summaries['income_monthly'], 'income-monthly-table', {'year': lambda row: str(row['month'])[:4]}, '収入データがありません。')}
 
-  <h2>収入明細</h2>
-  {filter_toolbar('income-detail-table', [('month', '月', income_months), ('owner', '区分', owner_options), ('source', '収入元', income_sources)], len(income_detail), income_total, '件', 100)}
-  {df_to_html_table(income_detail, 'income-detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'owner': 'owner', 'source': 'income_source'}, '収入データがありません。')}
-
-  <h2>月別支出</h2>
+  <h2 id="expenses">支出</h2>
+  <p class="section-note">投資を除いた生活支出を、月・カテゴリ・支払元の順に確認できます。</p>
+  <h3 id="monthly-expenses">月ごとの合計</h3>
   {filter_toolbar('monthly-table', [('year', '年', years)], len(summaries['monthly']), spending_total)}
   {df_to_html_table(summaries['monthly'], 'monthly-table', {'year': lambda row: str(row['month'])[:4]})}
 
-  <h2>投資集計</h2>
-  {filter_toolbar('investment-monthly-table', [('year', '年', years)], len(summaries['investment_monthly']), investment_total)}
-  {df_to_html_table(summaries['investment_monthly'], 'investment-monthly-table', {'year': lambda row: str(row['month'])[:4]}, '投資データがありません。')}
-
-  <h2>月別・支払元別集計</h2>
-  {filter_toolbar('source-monthly-table', [('source', '支払元', payment_sources)], len(summaries['source_monthly']), spending_total)}
-  {df_to_html_table(summaries['source_monthly'], 'source-monthly-table', {'source': 'payment_source'})}
-
-  <h2>カテゴリ別合計</h2>
+  <h3 id="category-expenses">カテゴリごとの支出</h3>
+  <h4>全期間の合計</h4>
   {filter_toolbar('category-total-table', [('category', 'カテゴリ', spending_categories)], len(summaries['category_total']), spending_total)}
   {df_to_html_table(summaries['category_total'], 'category-total-table', {'category': 'category'})}
 
-  <h2>月別・カテゴリ別集計</h2>
+  <h4>月ごとの内訳</h4>
   {filter_toolbar('category-monthly-table', [('month', '月', months), ('category', 'カテゴリ', spending_categories)], len(summaries['category_monthly']), spending_total)}
   {df_to_html_table(summaries['category_monthly'], 'category-monthly-table', {'month': 'month', 'category': 'category'})}
 
-  <h2>支出明細一覧</h2>
-  {filter_toolbar('detail-table', [('month', '月', months), ('owner', '区分', owner_options), ('source', '支払元', payment_sources), ('category', 'カテゴリ', categories)], len(detail), expense_total, '件', 100)}
+  <h3 id="source-expenses">支払元ごとの支出</h3>
+  {filter_toolbar('source-monthly-table', [('source', '支払元', payment_sources)], len(summaries['source_monthly']), spending_total)}
+  {df_to_html_table(summaries['source_monthly'], 'source-monthly-table', {'source': 'payment_source'})}
+
+  <h2 id="investments">投資</h2>
+  <p class="section-note">生活支出とは分けて集計しています。</p>
+  <h3 id="monthly-investments">月ごとの投資</h3>
+  {filter_toolbar('investment-monthly-table', [('year', '年', years)], len(summaries['investment_monthly']), investment_total)}
+  {df_to_html_table(summaries['investment_monthly'], 'investment-monthly-table', {'year': lambda row: str(row['month'])[:4]}, '投資データがありません。')}
+
+  <h2 id="details">明細</h2>
+  <p class="section-note">個々の取引を絞り込んで確認できます。</p>
+  <h3 id="income-details">収入明細</h3>
+  {filter_toolbar('income-detail-table', [('month', '月', income_months), ('owner', '家計区分', owner_options), ('source', '収入元', income_sources)], len(income_detail), income_total, '件', 100)}
+  {df_to_html_table(income_detail, 'income-detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'owner': 'owner', 'source': 'income_source'}, '収入データがありません。')}
+
+  <h3 id="expense-details">支出明細</h3>
+  {filter_toolbar('detail-table', [('month', '月', months), ('owner', '家計区分', owner_options), ('source', '支払元', payment_sources), ('category', 'カテゴリ', categories)], len(detail), expense_total, '件', 100)}
   {df_to_html_table(detail, 'detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'owner': 'owner', 'source': 'payment_source', 'category': 'category'})}
   <script>
     const chartData = JSON.parse(document.getElementById('chart-data').textContent);

@@ -1,6 +1,7 @@
 from __future__ import annotations
 
 import html
+import json
 from pathlib import Path
 
 import pandas as pd
@@ -389,11 +390,78 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
         )
         categories.insert(special_position, INVESTMENT_CATEGORY)
 
+    cashflow_chart_rows = [
+        {
+            "month": str(row["month"]),
+            "income": float(row["income_amount"]),
+            "expense": float(row["expense_amount"]),
+        }
+        for _, row in summaries["cashflow_monthly"].iterrows()
+    ]
+
+    category_chart = summaries["category_monthly"].copy()
+    chart_categories = []
+    category_chart_rows = []
+    if not category_chart.empty:
+        category_totals = (
+            category_chart.groupby("category")["amount"].sum().abs().sort_values(
+                ascending=False
+            )
+        )
+        reserved_categories = [
+            category
+            for category in ["その他", "未分類"]
+            if category in category_totals.index
+        ]
+        regular_limit = 10 - len(reserved_categories)
+        top_categories = (
+            category_totals.drop(index=reserved_categories, errors="ignore")
+            .head(regular_limit)
+            .index.tolist()
+        )
+        preserved_categories = set(top_categories) | set(reserved_categories)
+        category_chart["chart_category"] = category_chart["category"].where(
+            category_chart["category"].isin(preserved_categories),
+            "その他カテゴリ",
+        )
+        category_chart = category_chart.groupby(
+            ["month", "chart_category"], as_index=False
+        )["amount"].sum()
+        chart_categories = top_categories.copy()
+        if "その他カテゴリ" in set(category_chart["chart_category"]):
+            chart_categories.append("その他カテゴリ")
+        chart_categories.extend(reserved_categories)
+        category_chart_rows = [
+            {
+                "month": str(row["month"]),
+                "category": str(row["chart_category"]),
+                "amount": float(row["amount"]),
+            }
+            for _, row in category_chart.iterrows()
+        ]
+
+    chart_data_json = json.dumps(
+        {
+            "cashflow": cashflow_chart_rows,
+            "categorySpending": category_chart_rows,
+            "categories": chart_categories,
+        },
+        ensure_ascii=False,
+        separators=(",", ":"),
+    ).replace("<", "\\u003c")
+    chart_year_options = ['<option value="">全て</option>']
+    for index, year in enumerate(cashflow_years):
+        selected = " selected" if index == 0 else ""
+        chart_year_options.append(
+            f'<option value="{html.escape(year, quote=True)}"{selected}>'
+            f"{html.escape(year)}</option>"
+        )
+
     html_text = f"""<!doctype html>
 <html lang="ja">
 <head>
   <meta charset="utf-8">
-  <title>カード明細レポート</title>
+  <title>家計収支レポート</title>
   <style>
     body {{ font-family: system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif; margin: 32px; background: #f7f8fb; color: #222; }}
     h1 {{ margin-bottom: 8px; }}
@@ -417,13 +485,22 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     .pagination {{ display: flex; align-items: center; gap: 8px; color: #555; font-size: 14px; font-variant-numeric: tabular-nums; }}
     .pagination button {{ width: 36px; height: 36px; border: 1px solid #aeb7c6; border-radius: 4px; background: white; color: #222; font-size: 24px; line-height: 1; cursor: pointer; }}
     .pagination button:disabled {{ color: #a0a6af; background: #f1f2f4; cursor: default; }}
+    .chart-toolbar {{ display: flex; align-items: end; gap: 12px; margin-bottom: 16px; }}
+    .chart-grid {{ display: grid; gap: 20px; }}
+    .chart-panel {{ background: white; border: 1px solid #dfe3ea; border-radius: 6px; padding: 16px; }}
+    .chart-panel h3 {{ margin: 0 0 12px; font-size: 16px; }}
+    .chart-scroll {{ overflow-x: auto; overflow-y: hidden; }}
+    .chart-scroll svg {{ display: block; min-width: 100%; }}
+    .chart-legend {{ display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 12px; color: #4b5563; font-size: 13px; }}
+    .legend-item {{ display: inline-flex; align-items: center; gap: 6px; }}
+    .legend-swatch {{ width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto; }}
     .empty {{ background: white; padding: 16px; border-radius: 8px; }}
     .note {{ color: #666; font-size: 13px; }}
     @media (max-width: 640px) {{ body {{ margin: 18px; }} .filter-fields, .filter-field {{ width: 100%; }} }}
   </style>
 </head>
 <body>
-  <h1>カード明細レポート</h1>
+  <h1>家計収支レポート</h1>
   <p class="note">CSVを読み込んで自動生成したローカルHTMLレポートです。</p>
 
   <div class="summary">
@@ -436,6 +513,30 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     <div class="card"><div class="label">投資合計</div><div class="value">{format_yen(investment_total)}</div></div>
     <div class="card"><div class="label">全明細件数</div><div class="value">{count:,}件</div></div>
   </div>
+
+  <h2>月別グラフ</h2>
+  <div class="chart-toolbar">
+    <div class="filter-field">
+      <label for="chart-year-filter">年</label>
+      <select id="chart-year-filter">{''.join(chart_year_options)}</select>
+    </div>
+  </div>
+  <div class="chart-grid">
+    <section class="chart-panel">
+      <h3>収入と支出</h3>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-swatch" style="background:#059669"></span>収入</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:#e11d48"></span>支出</span>
+      </div>
+      <div class="chart-scroll"><svg id="cashflow-chart" role="img" aria-label="月別の収入と支出"></svg></div>
+    </section>
+    <section class="chart-panel">
+      <h3>カテゴリ別支出</h3>
+      <div class="chart-legend" id="category-chart-legend"></div>
+      <div class="chart-scroll"><svg id="category-chart" role="img" aria-label="月別のカテゴリ別支出"></svg></div>
+    </section>
+  </div>
+  <script type="application/json" id="chart-data">{chart_data_json}</script>
 
   <h2>収支集計</h2>
   <h3>年別</h3>
@@ -487,6 +588,210 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
   {filter_toolbar('detail-table', [('month', '月', months), ('owner', '区分', owner_options), ('source', '支払元', payment_sources), ('category', 'カテゴリ', categories)], len(detail), expense_total, '件', 100)}
   {df_to_html_table(detail, 'detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'owner': 'owner', 'source': 'payment_source', 'category': 'category'})}
   <script>
+    const chartData = JSON.parse(document.getElementById('chart-data').textContent);
+    const chartPalette = [
+      '#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2',
+      '#db2777', '#65a30d', '#4f46e5', '#ea580c', '#0f766e'
+    ];
+    const specialCategoryColors = {{
+      'その他カテゴリ': '#9ca3af',
+      'その他': '#6b7280',
+      '未分類': '#dc2626'
+    }};
+    const svgNamespace = 'http://www.w3.org/2000/svg';
+
+    function categoryColor(category) {{
+      return specialCategoryColors[category]
+        || chartPalette[chartData.categories.indexOf(category) % chartPalette.length];
+    }}
+
+    function createSvgElement(tag, attributes = {{}}, text = '') {{
+      const element = document.createElementNS(svgNamespace, tag);
+      Object.entries(attributes).forEach(([name, value]) => element.setAttribute(name, value));
+      if (text) element.textContent = text;
+      return element;
+    }}
+
+    function addBarTitle(bar, text) {{
+      bar.appendChild(createSvgElement('title', {{}}, text));
+    }}
+
+    function formatChartYen(value) {{
+      return new Intl.NumberFormat('ja-JP', {{
+        style: 'currency', currency: 'JPY', maximumFractionDigits: 1
+      }}).format(value);
+    }}
+
+    function formatCompactYen(value) {{
+      return new Intl.NumberFormat('ja-JP', {{
+        notation: 'compact', maximumFractionDigits: 1
+      }}).format(value);
+    }}
+
+    function drawEmptyChart(svg, width, height) {{
+      svg.setAttribute('viewBox', `0 0 ${{width}} ${{height}}`);
+      svg.setAttribute('width', width);
+      svg.setAttribute('height', height);
+      svg.appendChild(createSvgElement('text', {{
+        x: width / 2, y: height / 2, 'text-anchor': 'middle', fill: '#6b7280'
+      }}, 'データがありません'));
+    }}
+
+    function drawYAxis(svg, width, top, bottom, left, maximum, minimum = 0) {{
+      const plotHeight = bottom - top;
+      const range = maximum - minimum || 1;
+      for (let index = 0; index <= 5; index += 1) {{
+        const value = maximum - (range * index / 5);
+        const y = top + (plotHeight * index / 5);
+        svg.appendChild(createSvgElement('line', {{
+          x1: left, y1: y, x2: width - 20, y2: y, stroke: '#e5e7eb'
+        }}));
+        svg.appendChild(createSvgElement('text', {{
+          x: left - 8, y: y + 4, 'text-anchor': 'end', fill: '#6b7280',
+          'font-size': 11
+        }}, formatCompactYen(value)));
+      }}
+    }}
+
+    function renderCashflowChart(year) {{
+      const svg = document.getElementById('cashflow-chart');
+      svg.replaceChildren();
+      const rows = chartData.cashflow.filter(row => !year || row.month.startsWith(year));
+      const width = Math.max(760, rows.length * 72 + 100);
+      const height = 340;
+      const left = 72;
+      const top = 20;
+      const bottom = 285;
+      svg.setAttribute('viewBox', `0 0 ${{width}} ${{height}}`);
+      svg.setAttribute('width', width);
+      svg.setAttribute('height', height);
+      if (!rows.length) {{ drawEmptyChart(svg, width, height); return; }}
+
+      const maximum = Math.max(1, ...rows.flatMap(row => [row.income, row.expense]));
+      drawYAxis(svg, width, top, bottom, left, maximum);
+      const scale = (bottom - top) / maximum;
+      const groupWidth = (width - left - 20) / rows.length;
+      const barWidth = Math.min(24, Math.max(10, groupWidth * 0.3));
+
+      rows.forEach((row, index) => {{
+        const center = left + groupWidth * (index + 0.5);
+        [
+          {{ key: 'income', color: '#059669', offset: -barWidth - 2, label: '収入' }},
+          {{ key: 'expense', color: '#e11d48', offset: 2, label: '支出' }}
+        ].forEach(series => {{
+          const value = row[series.key];
+          const barHeight = Math.max(0, value * scale);
+          const bar = createSvgElement('rect', {{
+            x: center + series.offset,
+            y: bottom - barHeight,
+            width: barWidth,
+            height: barHeight,
+            fill: series.color,
+            rx: 2
+          }});
+          addBarTitle(bar, `${{row.month}} ${{series.label}} ${{formatChartYen(value)}}`);
+          svg.appendChild(bar);
+        }});
+        svg.appendChild(createSvgElement('text', {{
+          x: center, y: bottom + 22, 'text-anchor': 'middle', fill: '#4b5563',
+          'font-size': 11
+        }}, row.month));
+      }});
+    }}
+
+    function renderCategoryChart(year) {{
+      const svg = document.getElementById('category-chart');
+      const legend = document.getElementById('category-chart-legend');
+      svg.replaceChildren();
+      legend.replaceChildren();
+      const rows = chartData.categorySpending.filter(
+        row => !year || row.month.startsWith(year)
+      );
+      const months = [...new Set(rows.map(row => row.month))].sort();
+      const visibleCategories = chartData.categories.filter(
+        category => rows.some(row => row.category === category && row.amount !== 0)
+      );
+      const width = Math.max(760, months.length * 64 + 100);
+      const height = 340;
+      const left = 72;
+      const top = 20;
+      const bottom = 285;
+      svg.setAttribute('viewBox', `0 0 ${{width}} ${{height}}`);
+      svg.setAttribute('width', width);
+      svg.setAttribute('height', height);
+      if (!rows.length) {{ drawEmptyChart(svg, width, height); return; }}
+
+      const valuesByMonth = new Map();
+      months.forEach(month => valuesByMonth.set(month, new Map()));
+      rows.forEach(row => valuesByMonth.get(row.month).set(row.category, row.amount));
+      const positiveTotals = months.map(month =>
+        [...valuesByMonth.get(month).values()].filter(value => value > 0)
+          .reduce((total, value) => total + value, 0)
+      );
+      const negativeTotals = months.map(month =>
+        Math.abs([...valuesByMonth.get(month).values()].filter(value => value < 0)
+          .reduce((total, value) => total + value, 0))
+      );
+      const maximum = Math.max(1, ...positiveTotals);
+      const negativeMaximum = Math.max(0, ...negativeTotals);
+      drawYAxis(svg, width, top, bottom, left, maximum, -negativeMaximum);
+      const scale = (bottom - top) / (maximum + negativeMaximum || 1);
+      const baseline = top + maximum * scale;
+      svg.appendChild(createSvgElement('line', {{
+        x1: left, y1: baseline, x2: width - 20, y2: baseline,
+        stroke: '#6b7280', 'stroke-width': 1.2
+      }}));
+      const groupWidth = (width - left - 20) / months.length;
+      const barWidth = Math.min(38, Math.max(16, groupWidth * 0.58));
+
+      visibleCategories.forEach(category => {{
+        const color = categoryColor(category);
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        const swatch = document.createElement('span');
+        swatch.className = 'legend-swatch';
+        swatch.style.background = color;
+        item.append(swatch, document.createTextNode(category));
+        legend.appendChild(item);
+      }});
+
+      months.forEach((month, index) => {{
+        const center = left + groupWidth * (index + 0.5);
+        let positiveOffset = 0;
+        let negativeOffset = 0;
+        visibleCategories.forEach(category => {{
+          const value = valuesByMonth.get(month).get(category) || 0;
+          if (!value) return;
+          const color = categoryColor(category);
+          const barHeight = Math.abs(value) * scale;
+          const y = value > 0
+            ? baseline - (positiveOffset + value) * scale
+            : baseline + negativeOffset * scale;
+          const bar = createSvgElement('rect', {{
+            x: center - barWidth / 2, y, width: barWidth,
+            height: barHeight, fill: color
+          }});
+          addBarTitle(bar, `${{month}} ${{category}} ${{formatChartYen(value)}}`);
+          svg.appendChild(bar);
+          if (value > 0) positiveOffset += value;
+          else negativeOffset += Math.abs(value);
+        }});
+        svg.appendChild(createSvgElement('text', {{
+          x: center, y: bottom + 22, 'text-anchor': 'middle', fill: '#4b5563',
+          'font-size': 11
+        }}, month));
+      }});
+    }}
+
+    function renderCharts() {{
+      const year = document.getElementById('chart-year-filter').value;
+      renderCashflowChart(year);
+      renderCategoryChart(year);
+    }}
+
+    document.getElementById('chart-year-filter').addEventListener('change', renderCharts);
+    renderCharts();
+
     const tableRows = new Map();
     const filteredTableRows = new Map();
     const currentTablePages = new Map();

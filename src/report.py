@@ -523,6 +523,24 @@ def generate_html_report(
         }
         for _, row in summaries["cashflow_monthly"].iterrows()
     ]
+    owner_cashflow_chart_rows = [
+        {
+            "month": str(row["month"]),
+            "owner": str(row["owner"]),
+            "balance": float(row["balance"]),
+        }
+        for _, row in summaries["owner_cashflow_monthly"].iterrows()
+    ]
+    asset_chart_rows = [
+        {
+            "month": str(row["month"]),
+            "savings": float(row["savings_amount"]),
+            "debt": float(row["debt_amount"]),
+            "investment": float(row["investment_balance"]),
+            "netAssets": float(row["net_assets"]),
+        }
+        for _, row in asset_monthly.iterrows()
+    ]
 
     income_chart_rows = []
     income_chart_owners = []
@@ -578,6 +596,9 @@ def generate_html_report(
                 "育児",
                 "外食",
                 "娯楽",
+                "電気代",
+                "水道代",
+                "ガス代",
                 "未分類",
                 "その他",
             ]
@@ -640,6 +661,8 @@ def generate_html_report(
     chart_data_json = json.dumps(
         {
             "cashflow": cashflow_chart_rows,
+            "ownerCashflow": owner_cashflow_chart_rows,
+            "assets": asset_chart_rows,
             "income": income_chart_rows,
             "incomeOwners": income_chart_owners,
             "incomeSeries": income_chart_series,
@@ -717,6 +740,7 @@ def generate_html_report(
     .chart-toolbar.compact {{ margin: -4px 0 12px; }}
     .chart-grid {{ display: grid; gap: 20px; }}
     .chart-panel {{ min-width: 0; background: white; border: 1px solid #dfe3ea; border-radius: 6px; padding: 16px; }}
+    .asset-chart-panel {{ margin: 20px 0 24px; }}
     .chart-panel h3 {{ margin: 0 0 12px; font-size: 16px; }}
     .chart-scroll {{ width: 100%; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-gutter: stable; }}
     .chart-scroll svg {{ display: block; min-width: 100%; }}
@@ -739,9 +763,9 @@ def generate_html_report(
     <div class="nav-group">
       <a href="#overview">概要</a>
       <div class="nav-submenu">
+        <a href="#period-summary">期間サマリー</a>
+        <a href="#asset-summary">ざっくり資産</a>
         <a href="#monthly-trends">月別推移</a>
-        <a href="#balance-summary">収支</a>
-        <a href="#total-summary">全期間の合計</a>
       </div>
     </div>
     <div class="nav-group">
@@ -781,14 +805,35 @@ def generate_html_report(
   </nav>
 
   <h2 id="overview">概要</h2>
-  <p class="section-note">読み込んだ全期間の合計と、月ごとの推移です。</p>
-  <h3 id="monthly-trends">月別推移</h3>
+  <p class="section-note">選択した期間の収支と資産の概算、月ごとの推移です。</p>
   <div class="chart-toolbar">
     <div class="filter-field">
       <label for="chart-year-filter">年</label>
       <select id="chart-year-filter">{''.join(chart_year_options)}</select>
     </div>
   </div>
+  <div class="summary-group">
+    <h3 id="period-summary">期間サマリー</h3>
+    <p class="section-note"><span data-period-label>選択中の期間</span> の主要な収支です。</p>
+    <div class="summary">
+      <div class="card"><div class="label">全体収入</div><div class="value" data-period-summary="income">-</div></div>
+      <div class="card"><div class="label">全体支出</div><div class="value" data-period-summary="expense">-</div></div>
+      <div class="card"><div class="label">全体収支</div><div class="value" data-period-summary="balance">-</div></div>
+      <div class="card"><div class="label">夫の収支</div><div class="value" data-period-summary="husband">-</div></div>
+      <div class="card"><div class="label">妻の収支</div><div class="value" data-period-summary="wife">-</div></div>
+    </div>
+  </div>
+  <div class="summary-group">
+    <h3 id="asset-summary">ざっくり資産</h3>
+    <p class="section-note">{asset_note}</p>
+    {asset_cards_html}
+  </div>
+  <section class="chart-panel asset-chart-panel">
+    <h3>資産の推移</h3>
+    <div class="chart-legend" id="asset-chart-legend"></div>
+    <div class="chart-scroll"><svg id="asset-chart" role="img" aria-label="月別の資産推移"></svg></div>
+  </section>
+  <h3 id="monthly-trends">月別推移</h3>
   <div class="chart-grid">
     <section class="chart-panel">
       <h3>収入と支出</h3>
@@ -816,30 +861,6 @@ def generate_html_report(
     </section>
   </div>
   <script type="application/json" id="chart-data">{chart_data_json}</script>
-
-  <div class="summary-group">
-    <h3 id="balance-summary">収支</h3>
-    <div class="summary">
-      <div class="card"><div class="label">世帯全体</div><div class="value">{format_yen(balance)}</div></div>
-      <div class="card"><div class="label">夫</div><div class="value">{format_yen(owner_balances.get(HUSBAND_OWNER, 0))}</div></div>
-      <div class="card"><div class="label">妻</div><div class="value">{format_yen(owner_balances.get(WIFE_OWNER, 0))}</div></div>
-      <div class="card"><div class="label">共通</div><div class="value">{format_yen(owner_balances.get(COMMON_OWNER, 0))}</div></div>
-    </div>
-  </div>
-  <div class="summary-group">
-    <h3 id="total-summary">全期間の合計</h3>
-    <div class="summary">
-      <div class="card"><div class="label">収入</div><div class="value">{format_yen(income_total)}</div></div>
-      <div class="card"><div class="label">生活支出</div><div class="value">{format_yen(spending_total)}</div></div>
-      <div class="card"><div class="label">投資</div><div class="value">{format_yen(investment_total)}</div></div>
-      <div class="card"><div class="label">明細件数</div><div class="value">{count:,}件</div></div>
-    </div>
-  </div>
-  <div class="summary-group">
-    <h3 id="asset-summary">ざっくり資産</h3>
-    <p class="section-note">{asset_note}</p>
-    {asset_cards_html}
-  </div>
 
   <h2 id="assets">資産</h2>
   <p class="section-note">{asset_note} 貯金は「収入 - 生活支出 - 投資」、借金は奨学金返済分を差し引いて計算します。</p>
@@ -928,10 +949,19 @@ def generate_html_report(
       '育児': '#f59e0b',
       '外食': '#e11d48',
       '娯楽': '#7c3aed',
+      '電気代': '#facc15',
+      '水道代': '#0ea5e9',
+      'ガス代': '#f97316',
       'その他カテゴリ': '#64748b',
       'その他': '#cbd5e1',
       '未分類': '#a8a29e'
     }};
+    const assetSeries = [
+      {{ key: 'savings', label: '貯金額', color: '#2563eb' }},
+      {{ key: 'debt', label: '借金額', color: '#dc2626' }},
+      {{ key: 'investment', label: '投資残高', color: '#059669' }},
+      {{ key: 'netAssets', label: '純資産', color: '#7c3aed' }}
+    ];
     const svgNamespace = 'http://www.w3.org/2000/svg';
 
     function categoryColor(category) {{
@@ -992,6 +1022,12 @@ def generate_html_report(
     function formatChartYen(value) {{
       return new Intl.NumberFormat('ja-JP', {{
         style: 'currency', currency: 'JPY', maximumFractionDigits: 1
+      }}).format(value);
+    }}
+
+    function formatWholeYen(value) {{
+      return new Intl.NumberFormat('ja-JP', {{
+        style: 'currency', currency: 'JPY', maximumFractionDigits: 0
       }}).format(value);
     }}
 
@@ -1080,6 +1116,83 @@ def generate_html_report(
         }});
         svg.appendChild(createSvgElement('text', {{
           x: center, y: bottom + 22, 'text-anchor': 'middle', fill: '#4b5563',
+          'font-size': 11
+        }}, row.month));
+      }});
+    }}
+
+    function renderAssetChart(year) {{
+      const svg = document.getElementById('asset-chart');
+      const legend = document.getElementById('asset-chart-legend');
+      if (!svg || !legend) return;
+
+      svg.replaceChildren();
+      legend.replaceChildren();
+      const rows = chartData.assets.filter(row => !year || row.month.startsWith(year));
+      const width = Math.max(760, rows.length * 72 + 120);
+      const height = 340;
+      const left = 84;
+      const top = 20;
+      const bottom = 285;
+      svg.setAttribute('viewBox', `0 0 ${{width}} ${{height}}`);
+      svg.setAttribute('width', width);
+      svg.setAttribute('height', height);
+      if (!rows.length) {{ drawEmptyChart(svg, width, height); return; }}
+
+      const values = rows.flatMap(row => assetSeries.map(series => row[series.key] || 0));
+      const maximum = Math.max(1, ...values);
+      const minimum = Math.min(0, ...values);
+      drawYAxis(svg, width, top, bottom, left, maximum, minimum);
+      const range = maximum - minimum || 1;
+      const scaleY = (value) => bottom - ((value - minimum) / range) * (bottom - top);
+      const step = rows.length > 1 ? (width - left - 28) / (rows.length - 1) : 0;
+      const xForIndex = (index) => rows.length > 1
+        ? left + step * index
+        : left + (width - left - 28) / 2;
+
+      if (minimum < 0) {{
+        const zeroY = scaleY(0);
+        svg.appendChild(createSvgElement('line', {{
+          x1: left, y1: zeroY, x2: width - 20, y2: zeroY,
+          stroke: '#6b7280', 'stroke-width': 1.2
+        }}));
+      }}
+
+      assetSeries.forEach((series) => {{
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        const swatch = document.createElement('span');
+        swatch.className = 'legend-swatch';
+        swatch.style.background = series.color;
+        item.append(swatch, document.createTextNode(series.label));
+        legend.appendChild(item);
+
+        const points = rows.map((row, index) => `${{xForIndex(index)}},${{scaleY(row[series.key] || 0)}}`).join(' ');
+        svg.appendChild(createSvgElement('polyline', {{
+          points,
+          fill: 'none',
+          stroke: series.color,
+          'stroke-width': 2.4,
+          'stroke-linecap': 'round',
+          'stroke-linejoin': 'round'
+        }}));
+        rows.forEach((row, index) => {{
+          const x = xForIndex(index);
+          const y = scaleY(row[series.key] || 0);
+          const marker = createSvgElement('circle', {{
+            cx: x, cy: y, r: 3.8,
+            fill: series.color,
+            stroke: 'white',
+            'stroke-width': 1.2
+          }});
+          addBarTitle(marker, `${{row.month}} ${{series.label}} ${{formatChartYen(row[series.key] || 0)}}`);
+          svg.appendChild(marker);
+        }});
+      }});
+
+      rows.forEach((row, index) => {{
+        svg.appendChild(createSvgElement('text', {{
+          x: xForIndex(index), y: bottom + 22, 'text-anchor': 'middle', fill: '#4b5563',
           'font-size': 11
         }}, row.month));
       }});
@@ -1266,9 +1379,31 @@ def generate_html_report(
     function renderCharts() {{
       const year = document.getElementById('chart-year-filter').value;
       const selectedCategory = document.getElementById('category-chart-category-filter').value;
+      renderPeriodSummary(year);
+      renderAssetChart(year);
       renderCashflowChart(year);
       renderIncomeChart(year);
       renderCategoryChart(year, selectedCategory);
+    }}
+
+    function renderPeriodSummary(year) {{
+      const cashflowRows = chartData.cashflow.filter(row => !year || row.month.startsWith(year));
+      const ownerRows = chartData.ownerCashflow.filter(row => !year || row.month.startsWith(year));
+      const income = cashflowRows.reduce((total, row) => total + row.income, 0);
+      const expense = cashflowRows.reduce((total, row) => total + row.expense, 0);
+      const balance = income - expense;
+      const husband = ownerRows
+        .filter(row => row.owner === '夫')
+        .reduce((total, row) => total + row.balance, 0);
+      const wife = ownerRows
+        .filter(row => row.owner === '妻')
+        .reduce((total, row) => total + row.balance, 0);
+      const values = {{ income, expense, balance, husband, wife }};
+
+      document.querySelectorAll('[data-period-summary]').forEach((element) => {{
+        element.textContent = formatWholeYen(values[element.dataset.periodSummary] || 0);
+      }});
+      document.querySelector('[data-period-label]').textContent = year || '全期間';
     }}
 
     function setupCategoryChartFilter() {{

@@ -24,6 +24,7 @@ COLUMN_LABELS = {
     "payment_source": "支払元",
     "shop": "利用先",
     "income_source": "収入元",
+    "income_type": "収入種別",
     "category": "カテゴリ",
     "amount": "金額",
     "income_amount": "収入",
@@ -41,6 +42,17 @@ MONEY_COLUMNS = {
     "shared_expense_amount",
     "balance",
 }
+
+INCOME_TYPE_LABELS = {
+    "salary": "給与",
+    "bonus": "賞与",
+    "other": "その他",
+}
+
+
+def income_type_label(source_file: str) -> str:
+    stem = Path(str(source_file)).stem
+    return INCOME_TYPE_LABELS.get(stem.lower(), stem)
 
 
 def sort_category_summary(df: pd.DataFrame, leading_columns: list[str] | None = None) -> pd.DataFrame:
@@ -322,8 +334,9 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
 
     income_detail = income.copy()
     if not income_detail.empty:
+        income_detail["income_type"] = income_detail["source_file"].apply(income_type_label)
         income_detail = income_detail[
-            ["date", "owner", "shop", "amount", "source_file"]
+            ["date", "owner", "income_type", "shop", "amount", "source_file"]
         ]
         income_detail = income_detail.rename(columns={"shop": "income_source"})
         income_detail = income_detail.sort_values("date", ascending=False)
@@ -377,6 +390,11 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     income_sources = (
         sorted(income["shop"].astype(str).unique()) if not income.empty else []
     )
+    income_types = (
+        sorted({income_type_label(source_file) for source_file in income["source_file"]})
+        if not income.empty
+        else []
+    )
     spending_categories = (
         summaries["category_total"]["category"].astype(str).tolist()
         if not summaries["category_total"].empty
@@ -399,9 +417,47 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
         for _, row in summaries["cashflow_monthly"].iterrows()
     ]
 
+    income_chart_rows = []
+    income_chart_owners = []
+    income_chart_series = []
+    if not income.empty:
+        income_chart = income.assign(
+            month=income["date"].dt.strftime("%Y-%m"),
+            income_type=income["source_file"].apply(income_type_label),
+        ).groupby(["month", "owner", "income_type"], as_index=False)["amount"].sum()
+        owners_in_chart = set(income_chart["owner"].astype(str))
+        income_chart_owners = [
+            owner
+            for owner in [HUSBAND_OWNER, WIFE_OWNER, COMMON_OWNER]
+            if owner in owners_in_chart
+        ]
+        income_type_totals = (
+            income_chart.groupby("income_type")["amount"].sum().sort_values(ascending=False)
+        )
+        income_type_order = income_type_totals.index.tolist()
+        income_chart_series = [
+            {"owner": owner, "incomeType": income_type}
+            for owner in income_chart_owners
+            for income_type in income_type_order
+            if not income_chart[
+                (income_chart["owner"] == owner)
+                & (income_chart["income_type"] == income_type)
+            ].empty
+        ]
+        income_chart_rows = [
+            {
+                "month": str(row["month"]),
+                "owner": str(row["owner"]),
+                "incomeType": str(row["income_type"]),
+                "amount": float(row["amount"]),
+            }
+            for _, row in income_chart.iterrows()
+        ]
+
     category_chart = summaries["category_monthly"].copy()
     chart_categories = []
     category_chart_rows = []
+    grouped_categories = []
     if not category_chart.empty:
         category_totals = (
             category_chart.groupby("category")["amount"].sum().abs().sort_values(
@@ -410,16 +466,27 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
         )
         reserved_categories = [
             category
-            for category in ["その他", "未分類"]
+            for category in [
+                "医療費",
+                "育児",
+                "外食",
+                "娯楽",
+                "未分類",
+                "その他",
+            ]
             if category in category_totals.index
         ]
-        regular_limit = 10 - len(reserved_categories)
         top_categories = (
             category_totals.drop(index=reserved_categories, errors="ignore")
-            .head(regular_limit)
+            .head(10)
             .index.tolist()
         )
         preserved_categories = set(top_categories) | set(reserved_categories)
+        grouped_categories = [
+            str(category)
+            for category in category_totals.index
+            if category not in preserved_categories
+        ]
         category_chart["chart_category"] = category_chart["category"].where(
             category_chart["category"].isin(preserved_categories),
             "その他カテゴリ",
@@ -428,9 +495,17 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
             ["month", "chart_category"], as_index=False
         )["amount"].sum()
         chart_categories = top_categories.copy()
+        chart_categories.extend(
+            category
+            for category in reserved_categories
+            if category not in {"未分類", "その他"}
+        )
+        if "未分類" in reserved_categories:
+            chart_categories.append("未分類")
         if "その他カテゴリ" in set(category_chart["chart_category"]):
             chart_categories.append("その他カテゴリ")
-        chart_categories.extend(reserved_categories)
+        if "その他" in reserved_categories:
+            chart_categories.append("その他")
         category_chart_rows = [
             {
                 "month": str(row["month"]),
@@ -440,11 +515,30 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
             for _, row in category_chart.iterrows()
         ]
 
+    detail_category_groups = {"生活支出": spending_categories}
+    if grouped_categories:
+        detail_category_groups["その他カテゴリ"] = grouped_categories
+    categories.insert(0, "生活支出")
+    if grouped_categories:
+        grouped_position = next(
+            (
+                index
+                for index, category in enumerate(categories)
+                if category in LAST_CATEGORY_POSITIONS
+            ),
+            len(categories),
+        )
+        categories.insert(grouped_position, "その他カテゴリ")
+
     chart_data_json = json.dumps(
         {
             "cashflow": cashflow_chart_rows,
+            "income": income_chart_rows,
+            "incomeOwners": income_chart_owners,
+            "incomeSeries": income_chart_series,
             "categorySpending": category_chart_rows,
             "categories": chart_categories,
+            "detailCategoryGroups": detail_category_groups,
         },
         ensure_ascii=False,
         separators=(",", ":"),
@@ -501,11 +595,15 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     .nav-group:hover .nav-submenu, .nav-group:focus-within .nav-submenu {{ display: block; }}
     h2[id], h3[id], h4[id] {{ scroll-margin-top: 72px; }}
     .chart-toolbar {{ display: flex; align-items: end; gap: 12px; margin-bottom: 16px; }}
+    .chart-toolbar.compact {{ margin: -4px 0 12px; }}
     .chart-grid {{ display: grid; gap: 20px; }}
-    .chart-panel {{ background: white; border: 1px solid #dfe3ea; border-radius: 6px; padding: 16px; }}
+    .chart-panel {{ min-width: 0; background: white; border: 1px solid #dfe3ea; border-radius: 6px; padding: 16px; }}
     .chart-panel h3 {{ margin: 0 0 12px; font-size: 16px; }}
-    .chart-scroll {{ overflow-x: auto; overflow-y: hidden; }}
+    .chart-scroll {{ width: 100%; max-width: 100%; overflow-x: auto; overflow-y: hidden; scrollbar-gutter: stable; }}
     .chart-scroll svg {{ display: block; min-width: 100%; }}
+    .chart-drilldown {{ cursor: pointer; transition: opacity .15s ease, filter .15s ease; }}
+    .chart-drilldown:hover {{ filter: brightness(.9); }}
+    .chart-drilldown:focus {{ outline: none; opacity: .72; stroke: #111827; stroke-width: 2; }}
     .chart-legend {{ display: flex; gap: 14px; flex-wrap: wrap; margin: 0 0 12px; color: #4b5563; font-size: 13px; }}
     .legend-item {{ display: inline-flex; align-items: center; gap: 6px; }}
     .legend-swatch {{ width: 12px; height: 12px; border-radius: 2px; flex: 0 0 auto; }}
@@ -522,9 +620,9 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     <div class="nav-group">
       <a href="#overview">概要</a>
       <div class="nav-submenu">
+        <a href="#monthly-trends">月別推移</a>
         <a href="#balance-summary">収支</a>
         <a href="#total-summary">全期間の合計</a>
-        <a href="#monthly-trends">月別推移</a>
       </div>
     </div>
     <div class="nav-group">
@@ -561,6 +659,41 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
 
   <h2 id="overview">概要</h2>
   <p class="section-note">読み込んだ全期間の合計と、月ごとの推移です。</p>
+  <h3 id="monthly-trends">月別推移</h3>
+  <div class="chart-toolbar">
+    <div class="filter-field">
+      <label for="chart-year-filter">年</label>
+      <select id="chart-year-filter">{''.join(chart_year_options)}</select>
+    </div>
+  </div>
+  <div class="chart-grid">
+    <section class="chart-panel">
+      <h3>収入と支出</h3>
+      <div class="chart-legend">
+        <span class="legend-item"><span class="legend-swatch" style="background:#059669"></span>収入</span>
+        <span class="legend-item"><span class="legend-swatch" style="background:#e11d48"></span>支出</span>
+      </div>
+      <div class="chart-scroll"><svg id="cashflow-chart" role="img" aria-label="月別の収入と支出"></svg></div>
+    </section>
+    <section class="chart-panel">
+      <h3>夫・妻別の収入内訳</h3>
+      <div class="chart-legend" id="income-chart-legend"></div>
+      <div class="chart-scroll"><svg id="income-chart" role="img" aria-label="月別の家計区分・種別別収入"></svg></div>
+    </section>
+    <section class="chart-panel">
+      <h3>カテゴリ別支出</h3>
+      <div class="chart-toolbar compact">
+        <div class="filter-field">
+          <label for="category-chart-category-filter">カテゴリ</label>
+          <select id="category-chart-category-filter"><option value="">全て</option></select>
+        </div>
+      </div>
+      <div class="chart-legend" id="category-chart-legend"></div>
+      <div class="chart-scroll"><svg id="category-chart" role="img" aria-label="月別のカテゴリ別支出"></svg></div>
+    </section>
+  </div>
+  <script type="application/json" id="chart-data">{chart_data_json}</script>
+
   <div class="summary-group">
     <h3 id="balance-summary">収支</h3>
     <div class="summary">
@@ -579,30 +712,6 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
       <div class="card"><div class="label">明細件数</div><div class="value">{count:,}件</div></div>
     </div>
   </div>
-
-  <h3 id="monthly-trends">月別推移</h3>
-  <div class="chart-toolbar">
-    <div class="filter-field">
-      <label for="chart-year-filter">年</label>
-      <select id="chart-year-filter">{''.join(chart_year_options)}</select>
-    </div>
-  </div>
-  <div class="chart-grid">
-    <section class="chart-panel">
-      <h3>収入と支出</h3>
-      <div class="chart-legend">
-        <span class="legend-item"><span class="legend-swatch" style="background:#059669"></span>収入</span>
-        <span class="legend-item"><span class="legend-swatch" style="background:#e11d48"></span>支出</span>
-      </div>
-      <div class="chart-scroll"><svg id="cashflow-chart" role="img" aria-label="月別の収入と支出"></svg></div>
-    </section>
-    <section class="chart-panel">
-      <h3>カテゴリ別支出</h3>
-      <div class="chart-legend" id="category-chart-legend"></div>
-      <div class="chart-scroll"><svg id="category-chart" role="img" aria-label="月別のカテゴリ別支出"></svg></div>
-    </section>
-  </div>
-  <script type="application/json" id="chart-data">{chart_data_json}</script>
 
   <h2 id="cashflow">収支</h2>
   <p class="section-note">生活支出を収入から差し引いた金額です。共通支出は夫・妻に半分ずつ配分します。</p>
@@ -658,8 +767,8 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
   <h2 id="details">明細</h2>
   <p class="section-note">個々の取引を絞り込んで確認できます。</p>
   <h3 id="income-details">収入明細</h3>
-  {filter_toolbar('income-detail-table', [('month', '月', income_months), ('owner', '家計区分', owner_options), ('source', '収入元', income_sources)], len(income_detail), income_total, '件', 100)}
-  {df_to_html_table(income_detail, 'income-detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'owner': 'owner', 'source': 'income_source'}, '収入データがありません。')}
+  {filter_toolbar('income-detail-table', [('month', '月', income_months), ('owner', '家計区分', owner_options), ('income_type', '収入種別', income_types), ('source', '収入元', income_sources)], len(income_detail), income_total, '件', 100)}
+  {df_to_html_table(income_detail, 'income-detail-table', {'month': lambda row: row['date'].strftime('%Y-%m'), 'owner': 'owner', 'income_type': 'income_type', 'source': 'income_source'}, '収入データがありません。')}
 
   <h3 id="expense-details">支出明細</h3>
   {filter_toolbar('detail-table', [('month', '月', months), ('owner', '家計区分', owner_options), ('source', '支払元', payment_sources), ('category', 'カテゴリ', categories)], len(detail), expense_total, '件', 100)}
@@ -667,19 +776,48 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
   <script>
     const chartData = JSON.parse(document.getElementById('chart-data').textContent);
     const chartPalette = [
-      '#2563eb', '#059669', '#d97706', '#7c3aed', '#0891b2',
-      '#db2777', '#65a30d', '#4f46e5', '#ea580c', '#0f766e'
+      '#2563eb', '#059669', '#d97706', '#0891b2', '#65a30d',
+      '#4f46e5', '#ea580c', '#0f766e', '#92400e', '#0369a1'
     ];
+    const incomeOwnerColors = {{
+      '夫': '#2563eb',
+      '妻': '#db2777',
+      '共通': '#64748b'
+    }};
+    const incomeOwnerPalettes = {{
+      '夫': ['#1d4ed8', '#60a5fa', '#0f766e', '#38bdf8'],
+      '妻': ['#db2777', '#f472b6', '#9333ea', '#c084fc'],
+      '共通': ['#64748b', '#94a3b8', '#475569', '#cbd5e1']
+    }};
     const specialCategoryColors = {{
-      'その他カテゴリ': '#9ca3af',
-      'その他': '#6b7280',
-      '未分類': '#dc2626'
+      '医療費': '#0d9488',
+      '育児': '#f59e0b',
+      '外食': '#e11d48',
+      '娯楽': '#7c3aed',
+      'その他カテゴリ': '#64748b',
+      'その他': '#cbd5e1',
+      '未分類': '#a8a29e'
     }};
     const svgNamespace = 'http://www.w3.org/2000/svg';
 
     function categoryColor(category) {{
       return specialCategoryColors[category]
         || chartPalette[chartData.categories.indexOf(category) % chartPalette.length];
+    }}
+
+    function incomeOwnerColor(owner) {{
+      return incomeOwnerColors[owner] || '#64748b';
+    }}
+
+    function incomeSeriesKey(series) {{
+      return `${{series.owner}}|${{series.incomeType}}`;
+    }}
+
+    function incomeSeriesColor(series) {{
+      const sameOwnerSeries = chartData.incomeSeries.filter(item => item.owner === series.owner);
+      const index = sameOwnerSeries.findIndex(item => item.incomeType === series.incomeType);
+      const palette = incomeOwnerPalettes[series.owner] || ['#64748b'];
+      return palette[Math.max(index, 0) % palette.length];
     }}
 
     function createSvgElement(tag, attributes = {{}}, text = '') {{
@@ -691,6 +829,30 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
 
     function addBarTitle(bar, text) {{
       bar.appendChild(createSvgElement('title', {{}}, text));
+    }}
+
+    function makeBarInteractive(bar, label, callback) {{
+      bar.setAttribute('class', 'chart-drilldown');
+      bar.setAttribute('tabindex', '0');
+      bar.setAttribute('role', 'link');
+      bar.setAttribute('aria-label', `${{label}}の明細を表示`);
+      bar.addEventListener('click', callback);
+      bar.addEventListener('keydown', (event) => {{
+        if (event.key === 'Enter' || event.key === ' ') {{
+          event.preventDefault();
+          callback();
+        }}
+      }});
+    }}
+
+    function showFilteredDetails(tableId, headingId, values) {{
+      document.querySelectorAll(`[data-filter-table="${{tableId}}"]`).forEach((filter) => {{
+        filter.value = values[filter.dataset.filterName] || '';
+      }});
+      applyTableFilters(tableId);
+      document.getElementById(headingId).scrollIntoView({{
+        behavior: 'smooth', block: 'start'
+      }});
     }}
 
     function formatChartYen(value) {{
@@ -766,7 +928,20 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
             fill: series.color,
             rx: 2
           }});
-          addBarTitle(bar, `${{row.month}} ${{series.label}} ${{formatChartYen(value)}}`);
+          const label = `${{row.month}} ${{series.label}} ${{formatChartYen(value)}}`;
+          addBarTitle(bar, label);
+          makeBarInteractive(bar, label, () => {{
+            if (series.key === 'income') {{
+              showFilteredDetails('income-detail-table', 'income-details', {{
+                month: row.month
+              }});
+            }} else {{
+              showFilteredDetails('detail-table', 'expense-details', {{
+                month: row.month,
+                category: '生活支出'
+              }});
+            }}
+          }});
           svg.appendChild(bar);
         }});
         svg.appendChild(createSvgElement('text', {{
@@ -776,17 +951,19 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
       }});
     }}
 
-    function renderCategoryChart(year) {{
-      const svg = document.getElementById('category-chart');
-      const legend = document.getElementById('category-chart-legend');
+    function renderIncomeChart(year) {{
+      const svg = document.getElementById('income-chart');
+      const legend = document.getElementById('income-chart-legend');
       svg.replaceChildren();
       legend.replaceChildren();
-      const rows = chartData.categorySpending.filter(
-        row => !year || row.month.startsWith(year)
-      );
+      const rows = chartData.income.filter(row => !year || row.month.startsWith(year));
       const months = [...new Set(rows.map(row => row.month))].sort();
-      const visibleCategories = chartData.categories.filter(
-        category => rows.some(row => row.category === category && row.amount !== 0)
+      const visibleSeries = chartData.incomeSeries.filter(
+        series => rows.some(row =>
+          row.owner === series.owner
+          && row.incomeType === series.incomeType
+          && row.amount !== 0
+        )
       );
       const width = Math.max(760, months.length * 64 + 100);
       const height = 340;
@@ -797,6 +974,91 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
       svg.setAttribute('width', width);
       svg.setAttribute('height', height);
       if (!rows.length) {{ drawEmptyChart(svg, width, height); return; }}
+
+      const valuesByMonth = new Map();
+      months.forEach(month => valuesByMonth.set(month, new Map()));
+      rows.forEach(row => valuesByMonth.get(row.month).set(`${{row.owner}}|${{row.incomeType}}`, row.amount));
+      const totals = months.map(month =>
+        [...valuesByMonth.get(month).values()].reduce((total, value) => total + value, 0)
+      );
+      const maximum = Math.max(1, ...totals);
+      drawYAxis(svg, width, top, bottom, left, maximum);
+      const scale = (bottom - top) / maximum;
+      const groupWidth = (width - left - 20) / months.length;
+      const barWidth = Math.min(38, Math.max(16, groupWidth * 0.58));
+
+      visibleSeries.forEach(series => {{
+        const item = document.createElement('span');
+        item.className = 'legend-item';
+        const swatch = document.createElement('span');
+        swatch.className = 'legend-swatch';
+        swatch.style.background = incomeSeriesColor(series);
+        item.append(swatch, document.createTextNode(`${{series.owner}} / ${{series.incomeType}}`));
+        legend.appendChild(item);
+      }});
+
+      months.forEach((month, index) => {{
+        const center = left + groupWidth * (index + 0.5);
+        let offset = 0;
+        visibleSeries.forEach(series => {{
+          const value = valuesByMonth.get(month).get(incomeSeriesKey(series)) || 0;
+          if (!value) return;
+          const barHeight = Math.max(0, value * scale);
+          const bar = createSvgElement('rect', {{
+            x: center - barWidth / 2,
+            y: bottom - (offset + value) * scale,
+            width: barWidth,
+            height: barHeight,
+            fill: incomeSeriesColor(series)
+          }});
+          const label = `${{month}} ${{series.owner}} / ${{series.incomeType}} ${{formatChartYen(value)}}`;
+          addBarTitle(bar, label);
+          makeBarInteractive(bar, label, () => {{
+            showFilteredDetails('income-detail-table', 'income-details', {{
+              month,
+              owner: series.owner,
+              income_type: series.incomeType
+            }});
+          }});
+          svg.appendChild(bar);
+          offset += value;
+        }});
+        svg.appendChild(createSvgElement('text', {{
+          x: center, y: bottom + 22, 'text-anchor': 'middle', fill: '#4b5563',
+          'font-size': 11
+        }}, month));
+      }});
+    }}
+
+    function renderCategoryChart(year, selectedCategory) {{
+      const svg = document.getElementById('category-chart');
+      const legend = document.getElementById('category-chart-legend');
+      svg.replaceChildren();
+      legend.replaceChildren();
+      const allRowsForYear = chartData.categorySpending.filter(
+        row => !year || row.month.startsWith(year)
+      );
+      const rows = chartData.categorySpending.filter(
+        row => (!year || row.month.startsWith(year))
+          && (!selectedCategory || row.category === selectedCategory)
+      );
+      const months = [...new Set(allRowsForYear.map(row => row.month))].sort();
+      const visibleCategories = chartData.categories.filter(
+        category => (!selectedCategory || category === selectedCategory)
+          && (
+            selectedCategory === category
+            || rows.some(row => row.category === category && row.amount !== 0)
+          )
+      );
+      const width = Math.max(760, months.length * 64 + 100);
+      const height = 340;
+      const left = 72;
+      const top = 20;
+      const bottom = 285;
+      svg.setAttribute('viewBox', `0 0 ${{width}} ${{height}}`);
+      svg.setAttribute('width', width);
+      svg.setAttribute('height', height);
+      if (!months.length || !visibleCategories.length) {{ drawEmptyChart(svg, width, height); return; }}
 
       const valuesByMonth = new Map();
       months.forEach(month => valuesByMonth.set(month, new Map()));
@@ -848,7 +1110,14 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
             x: center - barWidth / 2, y, width: barWidth,
             height: barHeight, fill: color
           }});
-          addBarTitle(bar, `${{month}} ${{category}} ${{formatChartYen(value)}}`);
+          const label = `${{month}} ${{category}} ${{formatChartYen(value)}}`;
+          addBarTitle(bar, label);
+          makeBarInteractive(bar, label, () => {{
+            showFilteredDetails('detail-table', 'expense-details', {{
+              month,
+              category
+            }});
+          }});
           svg.appendChild(bar);
           if (value > 0) positiveOffset += value;
           else negativeOffset += Math.abs(value);
@@ -862,11 +1131,25 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
 
     function renderCharts() {{
       const year = document.getElementById('chart-year-filter').value;
+      const selectedCategory = document.getElementById('category-chart-category-filter').value;
       renderCashflowChart(year);
-      renderCategoryChart(year);
+      renderIncomeChart(year);
+      renderCategoryChart(year, selectedCategory);
+    }}
+
+    function setupCategoryChartFilter() {{
+      const filter = document.getElementById('category-chart-category-filter');
+      chartData.categories.forEach((category) => {{
+        const option = document.createElement('option');
+        option.value = category;
+        option.textContent = category;
+        filter.appendChild(option);
+      }});
+      filter.addEventListener('change', renderCharts);
     }}
 
     document.getElementById('chart-year-filter').addEventListener('change', renderCharts);
+    setupCategoryChartFilter();
     renderCharts();
 
     const tableRows = new Map();
@@ -923,6 +1206,10 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
       rows.forEach((row) => {{
         const visible = filters.every((filter) => {{
           const attribute = `data-${{filter.dataset.filterName}}`;
+          const groupedValues = filter.dataset.filterName === 'category'
+            ? chartData.detailCategoryGroups[filter.value]
+            : null;
+          if (groupedValues) return groupedValues.includes(row.getAttribute(attribute));
           return !filter.value || row.getAttribute(attribute) === filter.value;
         }});
         if (visible) {{

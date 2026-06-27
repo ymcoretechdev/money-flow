@@ -5,8 +5,10 @@ import webbrowser
 from pathlib import Path
 
 from category import load_category_rules, categorize
+from asset_loader import load_asset_snapshots
 from config import (
     ARCHIVE_DIR,
+    ASSET_SNAPSHOT_PATH,
     CATEGORY_RULES_PATH,
     INPUT_DIR,
     LOCAL_CATEGORY_RULES_PATH,
@@ -33,6 +35,7 @@ def main() -> None:
     settings = load_settings()
 
     df = load_all_transactions(INPUT_DIR, settings)
+    asset_snapshots = load_asset_snapshots(ASSET_SNAPSHOT_PATH)
     rules = load_category_rules(LOCAL_CATEGORY_RULES_PATH)
     rules.extend(load_category_rules(CATEGORY_RULES_PATH))
 
@@ -49,7 +52,7 @@ def main() -> None:
     ensure_parent(output_csv)
     df.to_csv(output_csv, index=False, encoding="utf-8-sig")
 
-    generate_html_report(df, output_html)
+    generate_html_report(df, output_html, asset_snapshots)
 
     if settings.get("archive_after_import", False):
         archive_csv_files()

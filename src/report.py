@@ -11,6 +11,7 @@ from utils import format_yen, ensure_parent
 
 LAST_CATEGORY_POSITIONS = {"その他": 1, "未分類": 2}
 INVESTMENT_CATEGORY = "投資"
+SCHOLARSHIP_REPAYMENT_CATEGORY = "奨学金返済"
 HUSBAND_OWNER = "夫"
 WIFE_OWNER = "妻"
 COMMON_OWNER = "共通"
@@ -32,6 +33,10 @@ COLUMN_LABELS = {
     "own_expense_amount": "個人支出",
     "shared_expense_amount": "共通負担",
     "balance": "収支",
+    "savings_amount": "貯金額",
+    "debt_amount": "借金額",
+    "investment_balance": "投資残高",
+    "net_assets": "純資産",
     "source_file": "取込ファイル",
 }
 MONEY_COLUMNS = {
@@ -41,6 +46,10 @@ MONEY_COLUMNS = {
     "own_expense_amount",
     "shared_expense_amount",
     "balance",
+    "savings_amount",
+    "debt_amount",
+    "investment_balance",
+    "net_assets",
 }
 
 INCOME_TYPE_LABELS = {
@@ -137,6 +146,83 @@ def build_owner_cashflow(
         ]
     ].sum()
     return monthly, yearly
+
+
+def build_asset_projection(
+    df: pd.DataFrame,
+    asset_snapshots: pd.DataFrame | None,
+) -> tuple[pd.DataFrame, dict[str, object]]:
+    columns = [
+        "month",
+        "savings_amount",
+        "debt_amount",
+        "investment_balance",
+        "net_assets",
+    ]
+    if asset_snapshots is None or asset_snapshots.empty:
+        return pd.DataFrame(columns=columns), {}
+
+    snapshot = asset_snapshots.sort_values("date").iloc[-1]
+    snapshot_date = pd.to_datetime(snapshot["date"])
+    savings_amount = float(snapshot["savings_amount"])
+    debt_amount = float(snapshot["debt_amount"])
+    investment_balance = float(snapshot["investment_balance"])
+
+    if df.empty:
+        net_assets = savings_amount + investment_balance - debt_amount
+        return pd.DataFrame(columns=columns), {
+            "snapshot_date": snapshot_date,
+            "savings_amount": savings_amount,
+            "debt_amount": debt_amount,
+            "investment_balance": investment_balance,
+            "net_assets": net_assets,
+        }
+
+    work = df[df["date"] > snapshot_date].copy()
+    if work.empty:
+        months = [snapshot_date.strftime("%Y-%m")]
+    else:
+        work["month"] = work["date"].dt.strftime("%Y-%m")
+        months = sorted(
+            set(work["month"]) | {snapshot_date.strftime("%Y-%m")}
+        )
+
+    rows = []
+    for month in months:
+        monthly = work[work["month"] == month] if not work.empty else work
+        income_amount = monthly.loc[
+            monthly["transaction_type"] == "income", "amount"
+        ].sum()
+        expense = monthly[monthly["transaction_type"] == "expense"]
+        spending_amount = expense.loc[
+            expense["category"] != INVESTMENT_CATEGORY, "amount"
+        ].sum()
+        investment_amount = expense.loc[
+            expense["category"] == INVESTMENT_CATEGORY, "amount"
+        ].sum()
+        debt_repayment_amount = expense.loc[
+            expense["category"] == SCHOLARSHIP_REPAYMENT_CATEGORY, "amount"
+        ].sum()
+
+        savings_amount += income_amount - spending_amount - investment_amount
+        investment_balance += investment_amount
+        debt_amount = max(0, debt_amount - debt_repayment_amount)
+        net_assets = savings_amount + investment_balance - debt_amount
+
+        rows.append(
+            {
+                "month": month,
+                "savings_amount": savings_amount,
+                "debt_amount": debt_amount,
+                "investment_balance": investment_balance,
+                "net_assets": net_assets,
+            }
+        )
+
+    monthly_assets = pd.DataFrame(rows, columns=columns)
+    current = monthly_assets.iloc[-1].to_dict() if not monthly_assets.empty else {}
+    current["snapshot_date"] = snapshot_date
+    return monthly_assets, current
 
 
 def build_summaries(df: pd.DataFrame) -> dict[str, pd.DataFrame]:
@@ -303,9 +389,14 @@ def filter_toolbar(
     )
 
 
-def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
+def generate_html_report(
+    df: pd.DataFrame,
+    output_path: Path,
+    asset_snapshots: pd.DataFrame | None = None,
+) -> None:
     ensure_parent(output_path)
     summaries = build_summaries(df)
+    asset_monthly, current_assets = build_asset_projection(df, asset_snapshots)
     expense = df[df["transaction_type"] == "expense"] if not df.empty else df
     income = df[df["transaction_type"] == "income"] if not df.empty else df
     spending = expense[expense["category"] != INVESTMENT_CATEGORY]
@@ -316,6 +407,17 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
     expense_total = spending_total + investment_total
     balance = income_total - spending_total
     count = len(df)
+    has_asset_snapshot = bool(current_assets)
+    snapshot_date_text = (
+        pd.to_datetime(current_assets["snapshot_date"]).strftime("%Y-%m-%d")
+        if has_asset_snapshot
+        else ""
+    )
+    asset_note = (
+        f"{html.escape(snapshot_date_text)} の残高を基準に、以後の収支を反映した概算です。"
+        if has_asset_snapshot
+        else "input/assets/snapshot.csv に基準日の貯金額・借金額・投資残高を入力すると表示されます。"
+    )
 
     detail = expense.copy()
     if not detail.empty:
@@ -370,6 +472,11 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
             reverse=True,
         )
         if not summaries["owner_cashflow_monthly"].empty
+        else []
+    )
+    asset_years = (
+        sorted({str(month)[:4] for month in asset_monthly["month"]}, reverse=True)
+        if not asset_monthly.empty
         else []
     )
     owner_options = [
@@ -550,6 +657,18 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
             f'<option value="{html.escape(year, quote=True)}"{selected}>'
             f"{html.escape(year)}</option>"
         )
+    asset_cards_html = (
+        f"""
+    <div class="summary">
+      <div class="card"><div class="label">貯金額</div><div class="value">{format_yen(current_assets.get("savings_amount", 0))}</div></div>
+      <div class="card"><div class="label">借金額</div><div class="value">{format_yen(current_assets.get("debt_amount", 0))}</div></div>
+      <div class="card"><div class="label">投資残高</div><div class="value">{format_yen(current_assets.get("investment_balance", 0))}</div></div>
+      <div class="card"><div class="label">純資産</div><div class="value">{format_yen(current_assets.get("net_assets", 0))}</div></div>
+    </div>
+"""
+        if has_asset_snapshot
+        else '<p class="empty">input/assets/snapshot.csv に基準残高を入力すると表示されます。</p>'
+    )
 
     html_text = f"""<!doctype html>
 <html lang="ja">
@@ -633,6 +752,10 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
       </div>
     </div>
     <div class="nav-group">
+      <a href="#assets">資産</a>
+      <div class="nav-submenu"><a href="#asset-monthly">月ごとの推移</a></div>
+    </div>
+    <div class="nav-group">
       <a href="#income">収入</a>
       <div class="nav-submenu"><a href="#monthly-income">月ごとの収入</a></div>
     </div>
@@ -712,6 +835,17 @@ def generate_html_report(df: pd.DataFrame, output_path: Path) -> None:
       <div class="card"><div class="label">明細件数</div><div class="value">{count:,}件</div></div>
     </div>
   </div>
+  <div class="summary-group">
+    <h3 id="asset-summary">ざっくり資産</h3>
+    <p class="section-note">{asset_note}</p>
+    {asset_cards_html}
+  </div>
+
+  <h2 id="assets">資産</h2>
+  <p class="section-note">{asset_note} 貯金は「収入 - 生活支出 - 投資」、借金は奨学金返済分を差し引いて計算します。</p>
+  <h3 id="asset-monthly">月ごとの推移</h3>
+  {filter_toolbar('asset-monthly-table', [('year', '年', asset_years)], len(asset_monthly), int(asset_monthly['net_assets'].iloc[-1]) if not asset_monthly.empty else 0, '行') if not asset_monthly.empty else ''}
+  {df_to_html_table(asset_monthly, 'asset-monthly-table', {'year': lambda row: str(row['month'])[:4]}, '資産データがありません。', amount_column='net_assets')}
 
   <h2 id="cashflow">収支</h2>
   <p class="section-note">生活支出を収入から差し引いた金額です。共通支出は夫・妻に半分ずつ配分します。</p>

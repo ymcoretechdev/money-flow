@@ -4,6 +4,7 @@ from pathlib import Path
 ROOT_DIR = Path(__file__).resolve().parents[1]
 CONFIG_DIR = ROOT_DIR / "config"
 INPUT_DIR = ROOT_DIR / "input"
+ASSET_SNAPSHOT_PATH = INPUT_DIR / "assets" / "snapshot.csv"
 ARCHIVE_DIR = ROOT_DIR / "archive"
 OUTPUT_DIR = ROOT_DIR / "output"
 LOG_DIR = ROOT_DIR / "logs"

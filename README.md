@@ -10,6 +10,9 @@
 - カテゴリ分類ルールはCSVで編集可能
 - 月別の収入・支出とカテゴリ別支出をグラフ表示
 
+Webサイトでも本ツールについて紹介しています。
+https://ymcoretech.com/money-flow-python-household-tool/
+
 ## フォルダ構成
 
 ```text
